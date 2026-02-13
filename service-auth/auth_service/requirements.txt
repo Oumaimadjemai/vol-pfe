@@ -6,3 +6,6 @@ djangorestframework_simplejwt==5.5.1
 PyJWT==2.11.0
 sqlparse==0.5.5
 tzdata==2025.3
+psycopg2-binary>=2.9
+python-decouple>=3.8
+dj-database-url>=1.0
