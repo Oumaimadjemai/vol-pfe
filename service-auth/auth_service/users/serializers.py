@@ -121,14 +121,9 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class VoyageurSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-
     class Meta:
         model = Voyageur
-        fields = "__all__"
-        read_only_fields = ["user"]
-
-
+        exclude = ["user"]
 
 class PassengerSerializer(serializers.ModelSerializer):
 
@@ -217,7 +212,7 @@ from rest_framework import serializers
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    username_field = "identifier"   # 🔥 VERY IMPORTANT
+    username_field = "identifier"
 
     identifier = serializers.CharField()
     password = serializers.CharField(write_only=True)
@@ -240,10 +235,22 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         refresh = self.get_token(user)
 
-        return {
+        response_data = {
             "refresh": str(refresh),
             "access": str(refresh.access_token),
             "role": user.role,
             "email": user.email,
             "username": user.username,
         }
+
+        # 🔥 If user is voyageur → add his info
+        if user.role == "voyageur":
+            try:
+                voyageur = Voyageur.objects.get(user=user)
+
+                response_data["voyageur"] = VoyageurSerializer(voyageur).data
+
+            except Voyageur.DoesNotExist:
+                response_data["voyageur"] = None
+
+        return response_data
