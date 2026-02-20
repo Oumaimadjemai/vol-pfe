@@ -6,10 +6,50 @@ from .models import User, Voyageur, Passenger
 
 
 
+# class RegisterVoyageurSerializer(serializers.Serializer):
+#     email = serializers.EmailField()
+#     password = serializers.CharField(write_only=True)
+
+#     nom = serializers.CharField()
+#     prenom = serializers.CharField()
+#     telephone = serializers.CharField()
+
+#     def validate_password(self, value):
+#         validate_password(value)
+#         return value
+    
+#     def validate_email(self, value):
+#       if User.objects.filter(email=value).exists():
+#         raise serializers.ValidationError("Email déjà utilisé")
+#       return value
+
+
+#     def create(self, validated_data):
+#         nom = validated_data.pop("nom")
+#         prenom = validated_data.pop("prenom")
+#         telephone = validated_data.pop("telephone")
+
+#         user = User.objects.create_user(
+#             email=validated_data["email"],
+#             password=validated_data["password"],
+#             role="voyageur"
+#         )
+
+#         Voyageur.objects.create(
+#             user=user,
+#             nom=nom,
+#             prenom=prenom,
+#             telephone=telephone,
+#             pays="",
+#             wilaya="",
+#             commune=""
+#         )
+
+#         return user
+
 class RegisterVoyageurSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
-
     nom = serializers.CharField()
     prenom = serializers.CharField()
     telephone = serializers.CharField()
@@ -17,18 +57,13 @@ class RegisterVoyageurSerializer(serializers.Serializer):
     def validate_password(self, value):
         validate_password(value)
         return value
-    
-    def validate_email(self, value):
-      if User.objects.filter(email=value).exists():
-        raise serializers.ValidationError("Email déjà utilisé")
-      return value
 
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Email déjà utilisé")
+        return value
 
     def create(self, validated_data):
-        nom = validated_data.pop("nom")
-        prenom = validated_data.pop("prenom")
-        telephone = validated_data.pop("telephone")
-
         user = User.objects.create_user(
             email=validated_data["email"],
             password=validated_data["password"],
@@ -37,17 +72,15 @@ class RegisterVoyageurSerializer(serializers.Serializer):
 
         Voyageur.objects.create(
             user=user,
-            nom=nom,
-            prenom=prenom,
-            telephone=telephone,
+            nom=validated_data["nom"],
+            prenom=validated_data["prenom"],
+            telephone=validated_data["telephone"],
             pays="",
             wilaya="",
             commune=""
         )
 
         return user
-
-
 
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField()  # email OR username
@@ -121,14 +154,44 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class VoyageurSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+    class Meta:
+        model = Voyageur
+        exclude = ["user"]
+
+class VoyageurSignupSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(write_only=True)
+    password = serializers.CharField(write_only=True)
 
     class Meta:
         model = Voyageur
-        fields = "__all__"
-        read_only_fields = ["user"]
+        fields = [
+            "email",
+            "password",
+            "nom",
+            "prenom",
+            "telephone",
+            "pays",
+            "wilaya",
+            "commune",
+            "sexe"
+        ]
 
+    def create(self, validated_data):
+        email = validated_data.pop("email")
+        password = validated_data.pop("password")
 
+        user = User.objects.create_user(
+            email=email,
+            password=password,
+            role="voyageur"
+        )
+
+        voyageur = Voyageur.objects.create(
+            user=user,
+            **validated_data
+        )
+
+        return voyageur
 
 class PassengerSerializer(serializers.ModelSerializer):
 
@@ -216,20 +279,62 @@ from django.contrib.auth import authenticate
 from rest_framework import serializers
 
 
+# class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+#     username_field = "identifier"
+
+#     identifier = serializers.CharField()
+#     password = serializers.CharField(write_only=True)
+
+#     def validate(self, attrs):
+#         identifier = attrs.get("identifier")
+#         password = attrs.get("password")
+
+#         user = authenticate(
+#             request=self.context.get("request"),
+#             username=identifier,
+#             password=password
+#         )
+
+#         if not user:
+#             raise serializers.ValidationError("Identifiants invalides")
+
+#         if user.is_blocked:
+#             raise serializers.ValidationError("Compte bloqué")
+
+#         refresh = self.get_token(user)
+
+#         response_data = {
+#             "refresh": str(refresh),
+#             "access": str(refresh.access_token),
+#             "role": user.role,
+#             "email": user.email,
+#             "username": user.username,
+#         }
+
+#         # 🔥 If user is voyageur → add his info
+#         if user.role == "voyageur":
+#             try:
+#                 voyageur = Voyageur.objects.get(user=user)
+
+#                 response_data["voyageur"] = VoyageurSerializer(voyageur).data
+
+#             except Voyageur.DoesNotExist:
+#                 response_data["voyageur"] = None
+
+#         return response_data
+    
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    username_field = "identifier"   # 🔥 VERY IMPORTANT
+    username_field = "identifier"
 
     identifier = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        identifier = attrs.get("identifier")
-        password = attrs.get("password")
-
         user = authenticate(
             request=self.context.get("request"),
-            username=identifier,
-            password=password
+            username=attrs.get("identifier"),
+            password=attrs.get("password")
         )
 
         if not user:
@@ -240,10 +345,18 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         refresh = self.get_token(user)
 
-        return {
+        data = {
             "refresh": str(refresh),
             "access": str(refresh.access_token),
             "role": user.role,
             "email": user.email,
             "username": user.username,
         }
+
+        if user.role == "voyageur":
+            voyageur = getattr(user, "voyageur", None)
+            data["voyageur"] = (
+                VoyageurSerializer(voyageur).data if voyageur else None
+            )
+
+        return data

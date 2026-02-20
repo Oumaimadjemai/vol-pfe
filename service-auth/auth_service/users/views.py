@@ -121,3 +121,52 @@ class ResetPasswordView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response({"message": "Mot de passe réinitialisé"})
+
+# users/views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.shortcuts import redirect
+from django.conf import settings
+
+class GoogleAuthCallbackView(APIView):
+    permission_classes = []  # Permet l'accès sans authentification
+    
+    def get(self, request):
+        # Cette vue reçoit le callback après l'auth Google
+        frontend_url = request.GET.get('frontend', settings.FRONTEND_URL)
+        
+        # Vérifier si l'utilisateur est authentifié
+        if request.user.is_authenticated:
+            # Générer les tokens JWT
+            refresh = RefreshToken.for_user(request.user)
+            
+            # Rediriger vers le frontend avec les tokens
+            redirect_url = f"{frontend_url}/auth/callback?access_token={str(refresh.access_token)}&refresh_token={str(refresh)}"
+            return redirect(redirect_url)
+        else:
+            return redirect(f"{frontend_url}/signin?error=auth_failed")
+        
+
+# users/views.py
+class GoogleSuccessView(APIView):
+    permission_classes = []
+
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return redirect(f"{settings.FRONTEND_URL}/signin")
+
+        refresh = RefreshToken.for_user(request.user)
+
+        voyageur = {
+            "nom": request.user.nom,
+            "prenom": request.user.prenom,
+        }
+
+        return redirect(
+            f"{settings.FRONTEND_URL}/auth/callback"
+            f"?access={str(refresh.access_token)}"
+            f"&refresh={str(refresh)}"
+            f"&voyageur={json.dumps(voyageur)}"
+        )
