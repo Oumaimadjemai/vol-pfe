@@ -51,12 +51,12 @@ class Personne(models.Model):
         ('femme', 'Femme'),
     )
 
-    nom = models.CharField(max_length=50)
-    prenom = models.CharField(max_length=50)
-    date_naissance = models.DateField(null=True, blank=True)
+    nom = models.CharField(max_length=50,null=True,blank=True)
+    prenom = models.CharField(max_length=50,null=True,blank=True)
+    date_naissance = models.DateField(null=True,blank=True)
     sexe = models.CharField(max_length=20, choices=SEXE_CHOICES)
-    num_passport = models.CharField(max_length=20, blank=True)
-    date_exp_passport = models.DateField(null=True, blank=True)
+    num_passport = models.CharField(max_length=20,null=True,blank=True)
+    date_exp_passport = models.DateField(null=True,blank=True)
     class Meta:
         abstract = True
 
@@ -67,10 +67,10 @@ class Voyageur(Personne):
         limit_choices_to={'role': 'voyageur'}
     )
 
-    telephone = models.CharField(max_length=20)
-    pays = models.CharField(max_length=50)
-    wilaya = models.CharField(max_length=100)
-    commune = models.CharField(max_length=100)
+    telephone = models.CharField(max_length=20,null=True,blank=True)
+    pays = models.CharField(max_length=50,null=True,blank=True)
+    wilaya = models.CharField(max_length=100,null=True,blank=True)
+    commune = models.CharField(max_length=100,null=True,blank=True)
 
     def __str__(self):
         return f"{self.nom} {self.prenom}"

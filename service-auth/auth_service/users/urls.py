@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path,include
 from .views import *
 
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -27,5 +27,12 @@ urlpatterns = [
     # Password
     path("change-password/", ChangePasswordView.as_view()),
     path("reset-password/", ResetPasswordView.as_view()),
+
+     path('api/auth/', include('dj_rest_auth.urls')),  # login/logout/password
+    path('api/auth/registration/', include('dj_rest_auth.registration.urls')),  # signup
+    path('accounts/', include('allauth.urls')),  # for OAuth callbacks
+    #  path('api/auth/google/callback/', GoogleAuthCallbackView.as_view(), name='google_callback'),
+     path("google-success/", GoogleSuccessView.as_view()),
 ]
 
+# 
