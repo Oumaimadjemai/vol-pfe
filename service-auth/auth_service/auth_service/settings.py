@@ -54,6 +54,7 @@ TOKEN_MODEL = None
 REST_USE_JWT = True
 SITE_ID = 1
 AUTH_USER_MODEL = 'users.User'
+SOCIALACCOUNT_ADAPTER = "users.adapter.MySocialAccountAdapter"
 
 AUTHENTICATION_BACKENDS = [
     'users.auth_backend.EmailOrUsernameBackend',
@@ -114,9 +115,35 @@ SOCIALACCOUNT_ADAPTER = "users.adapter.MySocialAccountAdapter"
 
 # Ajoutez cette ligne avec vos autres settings
 FRONTEND_URL = 'http://localhost:3000'  # Changez avec l'URL de votre frontend
-
+ACCOUNT_LOGOUT_REDIRECT_URL = 'http://localhost:3000'
 # Assurez-vous que ces settings sont présents
 LOGIN_REDIRECT_URL = '/auth/google-success/'
+# In settings.py
+ACCOUNT_EMAIL_VERIFICATION = 'none'  # For development
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_AUTHENTICATION_METHOD = 'email'
+ACCOUNT_USERNAME_REQUIRED = False
+# Session settings - CRITICAL for OAuth
+SESSION_COOKIE_AGE = 1209600  # 2 weeks in seconds
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_NAME = 'sessionid'
+SESSION_COOKIE_SAMESITE = 'Lax'  # Important for OAuth redirects
+SESSION_COOKIE_SECURE = False  # Set to True only in production with HTTPS
+SESSION_SAVE_EVERY_REQUEST = True  # This ensures session is saved on every request
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+
+# CSRF settings
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read CSRF token
+CSRF_TRUSTED_ORIGINS = ['http://localhost:3000']
+
+# Allauth settings
+ACCOUNT_AUTHENTICATED_LOGIN_REDIRECTS = True
+ACCOUNT_LOGOUT_ON_GET = True
+SOCIALACCOUNT_LOGIN_ON_GET = True
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+# Critical: Set the login redirect URL
 from datetime import timedelta
 
 REST_FRAMEWORK = {
@@ -208,3 +235,14 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# settings.py
+from decouple import config
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_USER')
+EMAIL_HOST_PASSWORD = config('EMAIL_PASSWORD')
+DEFAULT_FROM_EMAIL = config('EMAIL_USER')
