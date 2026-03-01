@@ -130,43 +130,105 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import redirect
 from django.conf import settings
 
-class GoogleAuthCallbackView(APIView):
-    permission_classes = []  # Permet l'accès sans authentification
-    
-    def get(self, request):
-        # Cette vue reçoit le callback après l'auth Google
-        frontend_url = request.GET.get('frontend', settings.FRONTEND_URL)
-        
-        # Vérifier si l'utilisateur est authentifié
-        if request.user.is_authenticated:
-            # Générer les tokens JWT
-            refresh = RefreshToken.for_user(request.user)
-            
-            # Rediriger vers le frontend avec les tokens
-            redirect_url = f"{frontend_url}/auth/callback?access_token={str(refresh.access_token)}&refresh_token={str(refresh)}"
-            return redirect(redirect_url)
-        else:
-            return redirect(f"{frontend_url}/signin?error=auth_failed")
         
 
 # users/views.py
+# class GoogleSuccessView(APIView):
+#     permission_classes = []
+
+#     def get(self, request):
+#         if not request.user.is_authenticated:
+#             return redirect(f"{settings.FRONTEND_URL}/signin")
+
+#         refresh = RefreshToken.for_user(request.user)
+
+#         voyageur = {
+#             "nom": request.user.nom,
+#             "prenom": request.user.prenom,
+#         }
+
+#         return redirect(
+#             f"{settings.FRONTEND_URL}/auth/callback"
+#             f"?access={str(refresh.access_token)}"
+#             f"&refresh={str(refresh)}"
+#             f"&voyageur={json.dumps(voyageur)}"
+#         )
+
+# users/views.py
+
+
+
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.shortcuts import redirect
+from django.conf import settings
+import json
+import urllib.parse
+
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.shortcuts import redirect
+from django.conf import settings
+from allauth.socialaccount.models import SocialAccount
+import json
+import urllib.parse
+
 class GoogleSuccessView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
-        if not request.user.is_authenticated:
-            return redirect(f"{settings.FRONTEND_URL}/signin")
-
-        refresh = RefreshToken.for_user(request.user)
-
-        voyageur = {
-            "nom": request.user.nom,
-            "prenom": request.user.prenom,
+        print("="*50)
+        print("GoogleSuccessView - GET request received")
+        
+        # Try to get user from session first
+        if request.user.is_authenticated:
+            user = request.user
+            print(f"User authenticated via session: {user.email}")
+        else:
+            # If not authenticated via session, try to get the last social login
+            # This is a workaround - get the most recent social account
+            try:
+                # This assumes the user just logged in with Google
+                # You might need to pass the user ID via state parameter
+                social_account = SocialAccount.objects.filter(provider='google').latest('id')
+                user = social_account.user
+                print(f"User found via social account: {user.email}")
+            except SocialAccount.DoesNotExist:
+                print("No social account found")
+                return redirect("http://localhost:3000/login?error=no_user")
+        
+        print(f"User email: {user.email}")
+        print(f"User ID: {user.id}")
+        
+        # Generate tokens
+        refresh = RefreshToken.for_user(user)
+        print(f"Access token generated: {str(refresh.access_token)[:20]}...")
+        
+        # Prepare user data
+        user_data = {
+            "id": user.id,
+            "email": user.email,
+            "nom": getattr(user, 'nom', ''),
+            "prenom": getattr(user, 'prenom', ''),
+            "role": getattr(user, 'role', 'voyageur')
         }
-
-        return redirect(
-            f"{settings.FRONTEND_URL}/auth/callback"
-            f"?access={str(refresh.access_token)}"
-            f"&refresh={str(refresh)}"
-            f"&voyageur={json.dumps(voyageur)}"
+        print(f"User data: {user_data}")
+        
+        # Encode data
+        user_data_json = json.dumps(user_data)
+        encoded_user_data = urllib.parse.quote(user_data_json)
+        
+        # Build URL
+        redirect_url = (
+            f"http://localhost:3000/auth/callback"
+            f"?access_token={refresh.access_token}"
+            f"&refresh_token={refresh}"
+            f"&voyageur={encoded_user_data}"
         )
+        
+        print(f"Full redirect URL: {redirect_url}")
+        print("="*50)
+        
+        return redirect(redirect_url)
