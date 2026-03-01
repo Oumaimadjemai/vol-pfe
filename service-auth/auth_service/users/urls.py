@@ -25,8 +25,11 @@ urlpatterns = [
     path("users/<int:pk>/delete/", UserDeleteView.as_view()),
 
     # Password
-    path("change-password/", ChangePasswordView.as_view()),
-    path("reset-password/", ResetPasswordView.as_view()),
+    path('password-reset/', PasswordResetRequestView.as_view(), name='password_reset'),
+    path('password-reset/confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
+    
+    # Change password (when logged in)
+    path('change-password/', ChangePasswordView.as_view(), name='change_password'),
 
      path('api/auth/', include('dj_rest_auth.urls')),  # login/logout/password
     path('api/auth/registration/', include('dj_rest_auth.registration.urls')),  # signup

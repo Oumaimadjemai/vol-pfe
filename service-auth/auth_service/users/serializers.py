@@ -211,63 +211,93 @@ class PassengerSerializer(serializers.ModelSerializer):
 
 
 
+# serializers.py
+from rest_framework import serializers
+from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.core.mail import send_mail
+from django.conf import settings
+
+User = get_user_model()
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    
+    def validate_email(self, value):
+        if not User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Aucun utilisateur avec cet email")
+        return value
+    
+    def save(self):
+        email = self.validated_data['email']
+        user = User.objects.get(email=email)
+        
+        # Generate token
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        
+        # Create reset link (frontend URL)
+        reset_link = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
+        
+        # Send email
+        send_mail(
+            'Réinitialisation de votre mot de passe',
+            f'Cliquez sur ce lien pour réinitialiser votre mot de passe: {reset_link}',
+            settings.DEFAULT_FROM_EMAIL,
+            [email],
+            fail_silently=False,
+        )
+        return user
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True, min_length=8)
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    
+    def validate(self, data):
+        if data['password'] != data['password_confirm']:
+            raise serializers.ValidationError("Les mots de passe ne correspondent pas")
+        
+        try:
+            uid = force_str(urlsafe_base64_decode(data['uid']))
+            self.user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            raise serializers.ValidationError("Lien de réinitialisation invalide")
+        
+        if not default_token_generator.check_token(self.user, data['token']):
+            raise serializers.ValidationError("Lien de réinitialisation invalide ou expiré")
+        
+        return data
+    
+    def save(self):
+        self.user.set_password(self.validated_data['password'])
+        self.user.save()
+        return self.user
+
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True)
-
-    def validate_new_password(self, value):
-        validate_password(value)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    new_password_confirm = serializers.CharField(write_only=True, min_length=8)
+    
+    def validate_old_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Ancien mot de passe incorrect")
         return value
-
+    
     def validate(self, data):
-        user = self.context["request"].user
-
-        if not user.check_password(data["old_password"]):
-            raise serializers.ValidationError(
-                {"old_password": "Mot de passe incorrect"}
-            )
-
+        if data['new_password'] != data['new_password_confirm']:
+            raise serializers.ValidationError("Les nouveaux mots de passe ne correspondent pas")
         return data
-
+    
     def save(self):
-        user = self.context["request"].user
-        user.set_password(self.validated_data["new_password"])
+        user = self.context['request'].user
+        user.set_password(self.validated_data['new_password'])
         user.save()
         return user
-
-class ResetPasswordSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    new_password = serializers.CharField(write_only=True)
-
-    def validate_new_password(self, value):
-        validate_password(value)
-        return value
-
-    def validate(self, data):
-        email = data.get("email")
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            raise serializers.ValidationError(
-                {"email": "Utilisateur introuvable"}
-            )
-
-        if user.is_blocked:
-            raise serializers.ValidationError(
-                {"email": "Compte bloqué"}
-            )
-
-        data["user"] = user
-        return data
-
-    def save(self):
-        user = self.validated_data["user"]
-        user.set_password(self.validated_data["new_password"])
-        user.save()
-        return user
-
-
 
 class BlockUserSerializer(serializers.ModelSerializer):
 

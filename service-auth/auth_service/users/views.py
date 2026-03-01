@@ -1,6 +1,6 @@
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .serializers import CustomTokenObtainPairSerializer
-from .serializers import ResetPasswordSerializer
+from .serializers import *
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -91,15 +91,44 @@ class UserDeleteView(generics.DestroyAPIView):
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
 
 
-from rest_framework.views import APIView
+# views.py
+from rest_framework import generics, status
 from rest_framework.response import Response
-from .serializers import ChangePasswordSerializer
+from rest_framework.permissions import IsAuthenticated, AllowAny
 
+
+# views.py (your existing code)
+class PasswordResetRequestView(generics.GenericAPIView):
+    serializer_class = PasswordResetRequestSerializer
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()  # This will now send email via SMTP
+        return Response(
+            {"message": "Email de réinitialisation envoyé"},
+            status=status.HTTP_200_OK
+        )
+class PasswordResetConfirmView(generics.GenericAPIView):
+    """Step 2: Confirm password reset with token"""
+    serializer_class = PasswordResetConfirmSerializer
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {"message": "Mot de passe réinitialisé avec succès"},
+            status=status.HTTP_200_OK
+        )
 
 class ChangePasswordView(generics.GenericAPIView):
+    """Change password when already logged in"""
     serializer_class = ChangePasswordSerializer
     permission_classes = [IsAuthenticated]
-
+    
     def post(self, request):
         serializer = self.get_serializer(
             data=request.data,
@@ -107,21 +136,10 @@ class ChangePasswordView(generics.GenericAPIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"message": "Mot de passe changé"})
-
-
-
-
-class ResetPasswordView(generics.GenericAPIView):
-    serializer_class = ResetPasswordSerializer
-    permission_classes = []
-
-    def post(self, request):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response({"message": "Mot de passe réinitialisé"})
-
+        return Response(
+            {"message": "Mot de passe changé avec succès"},
+            status=status.HTTP_200_OK
+        )
 # users/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
