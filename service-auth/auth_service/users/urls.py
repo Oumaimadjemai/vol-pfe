@@ -31,7 +31,7 @@ urlpatterns = [
     # Change password (when logged in)
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
 
-     path('api/auth/', include('dj_rest_auth.urls')),  # login/logout/password
+    #  path('api/auth/', include('dj_rest_auth.urls')),  # login/logout/password
     path('api/auth/registration/', include('dj_rest_auth.registration.urls')),  # signup
     path('accounts/', include('allauth.urls')),  # for OAuth callbacks
      path("google-success/", GoogleSuccessView.as_view()),

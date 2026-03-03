@@ -85,6 +85,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+CORS_ALLOW_HEADERS = ["*"]
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 # Pour permettre les cookies cross-origin en développement
 CORS_ALLOW_CREDENTIALS = True
@@ -246,3 +248,7 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_PASSWORD')
 DEFAULT_FROM_EMAIL = config('EMAIL_USER')
+
+
+INSTALLED_APPS.remove('corsheaders')
+MIDDLEWARE.remove('corsheaders.middleware.CorsMiddleware')
