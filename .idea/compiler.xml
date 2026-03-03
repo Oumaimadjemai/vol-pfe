@@ -8,6 +8,7 @@
         <outputRelativeToContentRoot value="true" />
         <module name="Registery" />
         <module name="Gateway" />
+        <module name="gateway" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
@@ -18,6 +19,7 @@
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
       <module name="Gateway" options="-parameters" />
       <module name="Registery" options="-parameters" />
+      <module name="gateway" options="-parameters" />
       <module name="gatway" options="-parameters" />
     </option>
   </component>
