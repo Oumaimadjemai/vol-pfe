@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    web-application-type: reactive
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      discovery:
+        locator:
+         enabled: true
+         lower-case-service-id: true
+      routes:
+        - id: auth-service-route
+          uri: lb://AUTH-SERVICE
+          predicates:
+            - Path=/auth-service/**
+          filters:
+            - StripPrefix=1
+
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8888/eureka/
+    fetch-registry: true
+    register-with-eureka: true
