@@ -36,6 +36,12 @@ spring:
             - AddResponseHeader=Access-Control-Allow-Origin, http://localhost:3000
             - AddResponseHeader=Access-Control-Allow-Methods, GET,POST,PUT,DELETE,OPTIONS
             - AddResponseHeader=Access-Control-Allow-Headers, *
+        - id: service-vols-route
+          uri: lb://SERVICE-VOLS
+          predicates:
+            - Path=/service-vols/**
+          filters:
+            - StripPrefix=1
 
 
 eureka:
