@@ -5,48 +5,6 @@ from django.contrib.auth import authenticate
 from .models import User, Voyageur, Passenger
 
 
-
-# class RegisterVoyageurSerializer(serializers.Serializer):
-#     email = serializers.EmailField()
-#     password = serializers.CharField(write_only=True)
-
-#     nom = serializers.CharField()
-#     prenom = serializers.CharField()
-#     telephone = serializers.CharField()
-
-#     def validate_password(self, value):
-#         validate_password(value)
-#         return value
-    
-#     def validate_email(self, value):
-#       if User.objects.filter(email=value).exists():
-#         raise serializers.ValidationError("Email déjà utilisé")
-#       return value
-
-
-#     def create(self, validated_data):
-#         nom = validated_data.pop("nom")
-#         prenom = validated_data.pop("prenom")
-#         telephone = validated_data.pop("telephone")
-
-#         user = User.objects.create_user(
-#             email=validated_data["email"],
-#             password=validated_data["password"],
-#             role="voyageur"
-#         )
-
-#         Voyageur.objects.create(
-#             user=user,
-#             nom=nom,
-#             prenom=prenom,
-#             telephone=telephone,
-#             pays="",
-#             wilaya="",
-#             commune=""
-#         )
-
-#         return user
-
 class RegisterVoyageurSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
@@ -157,6 +115,23 @@ class VoyageurSerializer(serializers.ModelSerializer):
     class Meta:
         model = Voyageur
         exclude = ["user"]
+
+class VoyageurDetailSerializer(serializers.ModelSerializer):
+    """Voyageur serializer with user details"""
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    user_is_active = serializers.BooleanField(source='user.is_active', read_only=True)
+    user_is_blocked = serializers.BooleanField(source='user.is_blocked', read_only=True)
+    
+    class Meta:
+        model = Voyageur
+        fields = [
+            'id', 'user', 'user_email', 'user_username', 'user_is_active', 'user_is_blocked',
+            'nom', 'prenom', 'date_naissance', 'sexe', 'telephone',
+            'pays', 'wilaya', 'commune', 'num_passport', 'date_exp_passport',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 class VoyageurSignupSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(write_only=True)
@@ -309,50 +284,6 @@ from django.contrib.auth import authenticate
 from rest_framework import serializers
 
 
-# class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-#     username_field = "identifier"
-
-#     identifier = serializers.CharField()
-#     password = serializers.CharField(write_only=True)
-
-#     def validate(self, attrs):
-#         identifier = attrs.get("identifier")
-#         password = attrs.get("password")
-
-#         user = authenticate(
-#             request=self.context.get("request"),
-#             username=identifier,
-#             password=password
-#         )
-
-#         if not user:
-#             raise serializers.ValidationError("Identifiants invalides")
-
-#         if user.is_blocked:
-#             raise serializers.ValidationError("Compte bloqué")
-
-#         refresh = self.get_token(user)
-
-#         response_data = {
-#             "refresh": str(refresh),
-#             "access": str(refresh.access_token),
-#             "role": user.role,
-#             "email": user.email,
-#             "username": user.username,
-#         }
-
-#         # 🔥 If user is voyageur → add his info
-#         if user.role == "voyageur":
-#             try:
-#                 voyageur = Voyageur.objects.get(user=user)
-
-#                 response_data["voyageur"] = VoyageurSerializer(voyageur).data
-
-#             except Voyageur.DoesNotExist:
-#                 response_data["voyageur"] = None
-
-#         return response_data
-    
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = "identifier"

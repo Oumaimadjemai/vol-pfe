@@ -20,6 +20,129 @@ class RegisterVoyageurView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response({"message": "Compte créé"}, status=status.HTTP_201_CREATED)
+    
+
+from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated,AllowAny
+from .models import Voyageur
+from .serializers import VoyageurSerializer
+from .permissions import IsVoyageur, IsAdminOrAgent
+
+
+class VoyageurListView(generics.ListAPIView):
+    """
+    List all voyageurs
+    URL: /voyageurs/
+    Accessible by: Admin/Agent only
+    """
+    queryset = Voyageur.objects.all()
+    serializer_class = VoyageurSerializer
+    permission_classes = [AllowAny]
+
+
+class VoyageurDetailView(generics.RetrieveAPIView):
+    """
+    Get a specific voyageur by ID
+    URL: /voyageurs/{id}/
+    Accessible by: Admin/Agent or the voyageur themselves
+    """
+    queryset = Voyageur.objects.all()
+    serializer_class = VoyageurSerializer
+    permission_classes = [AllowAny]
+    
+    def get_queryset(self):
+        user = self.request.user
+        voyageur_id = self.kwargs.get('pk')
+        
+        # Admin/Agent can see any voyageur
+        if user.role in ['admin', 'agent']:
+            return Voyageur.objects.all()
+        
+        # Voyageur can only see themselves
+        if user.role == 'voyageur' and hasattr(user, 'voyageur'):
+            if str(user.voyageur.id) == str(voyageur_id):
+                return Voyageur.objects.filter(id=voyageur_id)
+        
+        return Voyageur.objects.none()
+
+
+class VoyageurByUserView(generics.RetrieveAPIView):
+    """
+    Get voyageur by user ID
+    URL: /voyageurs/by-user/{user_id}/
+    Accessible by: Admin/Agent or the voyageur themselves
+    """
+    serializer_class = VoyageurSerializer
+    permission_classes = [AllowAny]
+    
+    def get_object(self):
+        user_id = self.kwargs.get('user_id')
+        
+        # Check permissions
+        current_user = self.request.user
+        
+        # Admin/Agent can access any voyageur by user_id
+        if current_user.role in ['admin', 'agent']:
+            try:
+                return Voyageur.objects.get(user_id=user_id)
+            except Voyageur.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Voyageur not found for this user")
+        
+        # Voyageur can only access their own
+        if current_user.role == 'voyageur' and current_user.id == int(user_id):
+            try:
+                return current_user.voyageur
+            except Voyageur.DoesNotExist:
+                from rest_framework.exceptions import NotFound
+                raise NotFound("Voyageur profile not found")
+        
+        # If no permission
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied("You don't have permission to access this voyageur")
+
+
+class VoyageurUpdateView(generics.UpdateAPIView):
+    """
+    Update a voyageur
+    URL: /voyageurs/{id}/update/
+    Accessible by: Admin/Agent or the voyageur themselves
+    """
+    serializer_class = VoyageurSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        voyageur_id = self.kwargs.get('pk')
+        
+        # Admin/Agent can update any voyageur
+        if user.role in ['admin', 'agent']:
+            return Voyageur.objects.all()
+        
+        # Voyageur can only update themselves
+        if user.role == 'voyageur' and hasattr(user, 'voyageur'):
+            if str(user.voyageur.id) == str(voyageur_id):
+                return Voyageur.objects.filter(id=voyageur_id)
+        
+        return Voyageur.objects.none()
+
+
+class VoyageurDeleteView(generics.DestroyAPIView):
+    """
+    Delete a voyageur
+    URL: /voyageurs/{id}/delete/
+    Accessible by: Admin/Agent only
+    """
+    queryset = Voyageur.objects.all()
+    serializer_class = VoyageurSerializer
+    permission_classes = [IsAuthenticated, IsAdminOrAgent]
+    
+    def perform_destroy(self, instance):
+        # This will delete both the voyageur and the associated user
+        # because of the CASCADE on the OneToOneField
+        user = instance.user
+        instance.delete()
+        user.delete()
 
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
@@ -64,6 +187,41 @@ class PassengerDeleteView(generics.DestroyAPIView):
         return Passenger.objects.filter(
             voyageur=self.request.user.voyageur
         )
+
+from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
+from .models import Passenger
+from .serializers import PassengerSerializer
+from .permissions import IsVoyageur, IsAdminOrAgent
+
+
+# Existing Passenger views...
+
+class PassengerByVoyageurView(generics.ListAPIView):
+    """
+    Get all passengers for a specific voyageur
+    URL: /passengers/by-voyageur/{voyageur_id}/
+    Accessible by: Voyageur (own) or Admin/Agent (all)
+    """
+    serializer_class = PassengerSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        voyageur_id = self.kwargs.get('voyageur_id')
+        
+        # Check permissions
+        user = self.request.user
+        
+        # If user is admin or agent, they can access any voyageur's passengers
+        if user.role in ['admin', 'agent']:
+            return Passenger.objects.filter(voyageur_id=voyageur_id)
+        
+        # If user is voyageur, they can only access their own passengers
+        if user.role == 'voyageur' and hasattr(user, 'voyageur') and user.voyageur.id == voyageur_id:
+            return Passenger.objects.filter(voyageur_id=voyageur_id)
+        
+        # If no permission, return empty queryset
+        return Passenger.objects.none()
 from .models import User
 from .serializers import AdminCreateUserSerializer, UserSerializer
 from .permissions import IsAdminOrAgent
@@ -150,29 +308,7 @@ from django.conf import settings
 
         
 
-# users/views.py
-# class GoogleSuccessView(APIView):
-#     permission_classes = []
 
-#     def get(self, request):
-#         if not request.user.is_authenticated:
-#             return redirect(f"{settings.FRONTEND_URL}/signin")
-
-#         refresh = RefreshToken.for_user(request.user)
-
-#         voyageur = {
-#             "nom": request.user.nom,
-#             "prenom": request.user.prenom,
-#         }
-
-#         return redirect(
-#             f"{settings.FRONTEND_URL}/auth/callback"
-#             f"?access={str(refresh.access_token)}"
-#             f"&refresh={str(refresh)}"
-#             f"&voyageur={json.dumps(voyageur)}"
-#         )
-
-# users/views.py
 
 
 
@@ -250,3 +386,29 @@ class GoogleSuccessView(APIView):
         print("="*50)
         
         return redirect(redirect_url)
+    
+
+# In your auth service (service 1) - add this view
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from .serializers import UserSerializer, VoyageurSerializer
+
+class MeView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        data = {
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'role': user.role,
+            'is_active': user.is_active,
+        }
+        
+        # Add voyageur data if role is voyageur
+        if user.role == 'voyageur' and hasattr(user, 'voyageur'):
+            data['voyageur'] = VoyageurSerializer(user.voyageur).data
+        
+        return Response(data)
