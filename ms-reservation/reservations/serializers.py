@@ -127,7 +127,7 @@ class PriceConfirmationSerializer(serializers.ModelSerializer):
         model = PriceConfirmation
         fields = [
             'id', 'offered_price', 'confirmed_price', 'currency',
-            'amadeus_offer_id', 'confirmed_at', 'expires_at', 'is_valid'
+            'confirmed_offer', 'confirmed_at', 'expires_at', 'is_valid'
         ]
 
 
@@ -173,16 +173,16 @@ class ReservationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'reservation_number', 'created_at', 'updated_at',
             'voyageur', 'status', 'trip_type', 'search_params',
-            'amadeus_offer_id', 'amadeus_pnr', 'amadeus_booking_data',
-            'last_confirmed_price', 'price_confirmed_at', 'confirmed_offer_data',
+            'original_offer', 'confirmed_offer', 'amadeus_pnr', 'amadeus_booking_data',
+            'last_confirmed_price', 'price_confirmed_at',
             'total_price', 'currency', 'expiry_date', 'confirmation_date',
             'flight_segments', 'passenger_reservations', 'payment',
             'price_confirmations'
         ]
         read_only_fields = [
             'id', 'reservation_number', 'created_at', 'updated_at',
-            'amadeus_offer_id', 'amadeus_pnr', 'amadeus_booking_data',
-            'last_confirmed_price', 'price_confirmed_at', 'confirmed_offer_data',
+            'original_offer', 'confirmed_offer', 'amadeus_pnr', 'amadeus_booking_data',
+            'last_confirmed_price', 'price_confirmed_at',
             'expiry_date', 'confirmation_date'
         ]
 

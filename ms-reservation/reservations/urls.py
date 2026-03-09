@@ -34,6 +34,9 @@ urlpatterns = [
     path('reservations/<int:pk>/confirm_price/', views.ReservationViewSet.as_view({
         'post': 'confirm_price'
     })),
+    path('reservations/<int:pk>/retry_failed/', views.ReservationViewSet.as_view({
+        'post': 'retry_failed'
+    })),
     path('reservations/<int:pk>/book/', views.ReservationViewSet.as_view({
         'post': 'book'
     })),

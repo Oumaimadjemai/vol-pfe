@@ -2,97 +2,76 @@ from django.contrib import admin
 from .models import Reservation, FlightSegment, PassengerReservation, Payment, PriceConfirmation
 
 
-class FlightSegmentInline(admin.TabularInline):
-    model = FlightSegment
-    extra = 0
-
-
-class PassengerReservationInline(admin.TabularInline):
-    model = PassengerReservation
-    extra = 0
-
-
-class PriceConfirmationInline(admin.TabularInline):
-    model = PriceConfirmation
-    extra = 0
-
-
 @admin.register(Reservation)
 class ReservationAdmin(admin.ModelAdmin):
     list_display = [
-        'reservation_number', 'voyageur', 'status', 'trip_type',
-        'total_price', 'currency', 'amadeus_pnr', 'created_at'
+        'id', 'reservation_number', 'voyageur', 'status', 
+        'trip_type', 'total_price', 'currency', 'created_at'
     ]
     list_filter = ['status', 'trip_type', 'created_at']
     search_fields = ['reservation_number', 'amadeus_pnr', 'voyageur']
     readonly_fields = [
-        'reservation_number', 'created_at', 'updated_at',
-        'amadeus_offer_id', 'amadeus_pnr', 'amadeus_booking_data'
+        'reservation_number', 
+        'created_at', 
+        'updated_at',
+        'amadeus_pnr', 
+        'amadeus_booking_data',
+        'last_confirmed_price', 
+        'price_confirmed_at', 
+        'confirmed_offer',
+        'expiry_date', 
+        'confirmation_date'
     ]
-    inlines = [FlightSegmentInline, PassengerReservationInline, PriceConfirmationInline]
-    
     fieldsets = (
-        ('Informations générales', {
-            'fields': (
-                'reservation_number', 'voyageur', 'status', 'trip_type',
-                'created_at', 'updated_at'
-            )
+        ('Identification', {
+            'fields': ('reservation_number', 'voyageur', 'status')
         }),
-        ('Amadeus', {
-            'fields': (
-                'amadeus_offer_id', 'amadeus_pnr', 'amadeus_booking_data'
-            )
+        ('Trip Information', {
+            'fields': ('trip_type', 'search_params')
         }),
-        ('Prix', {
-            'fields': (
-                'total_price', 'currency', 'last_confirmed_price',
-                'price_confirmed_at', 'confirmed_offer_data'
-            )
+        ('Pricing', {
+            'fields': ('total_price', 'currency', 'last_confirmed_price')
         }),
-        ('Paramètres de recherche', {
-            'fields': ('search_params',)
+        ('Amadeus Integration', {
+            'fields': ('original_offer', 'confirmed_offer', 'amadeus_pnr', 'amadeus_booking_data')
         }),
-        ('Dates importantes', {
-            'fields': ('expiry_date', 'confirmation_date')
+        ('Dates', {
+            'fields': ('created_at', 'updated_at', 'price_confirmed_at', 
+                      'expiry_date', 'confirmation_date')
         }),
     )
 
 
 @admin.register(FlightSegment)
 class FlightSegmentAdmin(admin.ModelAdmin):
-    list_display = [
-        'reservation', 'segment_number', 'origin', 'destination',
-        'departure_date', 'departure_time', 'price'
-    ]
-    list_filter = ['origin', 'destination', 'departure_date']
+    list_display = ['id', 'reservation', 'segment_number', 'origin', 'destination', 
+                   'departure_date', 'departure_time', 'price']
+    list_filter = ['departure_date', 'origin', 'destination']
     search_fields = ['reservation__reservation_number', 'origin', 'destination']
 
 
 @admin.register(PassengerReservation)
 class PassengerReservationAdmin(admin.ModelAdmin):
-    list_display = [
-        'reservation', 'passenger', 'check_in_status',
-        'seat_number', 'price_paid', 'amadeus_traveler_id'
-    ]
+    list_display = ['id', 'reservation', 'passenger', 'check_in_status', 'price_paid']
     list_filter = ['check_in_status']
     search_fields = ['reservation__reservation_number', 'passenger']
 
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display = [
-        'reservation', 'amount', 'currency', 'status',
-        'payment_method', 'transaction_id', 'created_at'
-    ]
+    list_display = ['id', 'reservation', 'amount', 'currency', 'status', 'payment_method', 'created_at']
     list_filter = ['status', 'payment_method', 'created_at']
     search_fields = ['reservation__reservation_number', 'transaction_id']
 
 
 @admin.register(PriceConfirmation)
 class PriceConfirmationAdmin(admin.ModelAdmin):
-    list_display = [
-        'reservation', 'offered_price', 'confirmed_price',
-        'currency', 'confirmed_at', 'expires_at'
-    ]
+    list_display = ['id', 'reservation', 'offered_price', 'confirmed_price', 
+                   'confirmed_at', 'expires_at', 'is_valid']
     list_filter = ['confirmed_at']
-    search_fields = ['reservation__reservation_number', 'amadeus_offer_id']
+    search_fields = ['reservation__reservation_number']
+    
+    def is_valid(self, obj):
+        return obj.is_valid()
+    is_valid.boolean = True
+    is_valid.short_description = 'Valid'

@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 class AuthServiceClient:
     """Client for communicating with auth service via Eureka"""
     
-    def __init__(self):
+    def __init__(self, request=None):
+        self.request = request
         self.service_name = "auth-service"
         self.base_url = None
         self.cache_timeout = 300  # 5 minutes
@@ -38,151 +39,175 @@ class AuthServiceClient:
         
         return self.base_url
     
+    def _get_auth_headers(self):
+        """Get authorization headers from the original request"""
+        headers = {
+            "Content-Type": "application/json",
+        }
+        
+        # Forward the Authorization header if it exists
+        if self.request and hasattr(self.request, 'headers'):
+            auth_header = self.request.headers.get('Authorization')
+            if auth_header:
+                headers['Authorization'] = auth_header
+                logger.info(f"Forwarding Authorization header: {auth_header[:20]}...")
+            else:
+                logger.warning("No Authorization header found in request")
+        else:
+            logger.warning("No request object available for auth headers")
+        
+        return headers
+    
     def get_voyageur_by_user_id(self, user_id: int) -> Optional[Dict]:
         """Get voyageur info by user_id"""
         base_url = self._get_service_url()
+        endpoint = f"{base_url}/auth/voyageurs/by-user/{user_id}/"
         
-        # Try different possible endpoints
-        endpoints = [
-            f"{base_url}/api/voyageurs/by-user/{user_id}/",
-            f"{base_url}/voyageurs/by-user/{user_id}/",
-            f"{base_url}/users/voyageurs/by-user/{user_id}/",
-            f"{base_url}/auth/voyageurs/by-user/{user_id}/",
-        ]
-        
-        for endpoint in endpoints:
-            try:
-                logger.info(f"Trying to get voyageur from: {endpoint}")
-                response = requests.get(endpoint, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.info(f"Found voyageur: {data}")
-                    return data
-            except requests.RequestException as e:
-                logger.debug(f"Endpoint {endpoint} failed: {e}")
-                continue
-        
-        logger.error(f"Could not find voyageur for user_id {user_id} in any endpoint")
-        return None
+        try:
+            logger.info(f"Getting voyageur from: {endpoint}")
+            headers = self._get_auth_headers()
+            
+            response = requests.get(endpoint, timeout=5, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Found voyageur: {data}")
+                return data
+            elif response.status_code == 401:
+                logger.error(f"Authentication failed when getting voyageur: {response.status_code}")
+                return None
+            else:
+                logger.error(f"Failed to get voyageur: {response.status_code} - {response.text}")
+                return None
+                
+        except requests.RequestException as e:
+            logger.error(f"Error getting voyageur for user_id {user_id}: {e}")
+            return None
     
     def get_voyageur_by_id(self, voyageur_id: int) -> Optional[Dict]:
         """Get voyageur info by voyageur ID"""
         base_url = self._get_service_url()
+        endpoint = f"{base_url}/auth/voyageurs/{voyageur_id}/"
         
-        # Try different possible endpoints
-        endpoints = [
-            f"{base_url}/api/voyageurs/{voyageur_id}/",
-            f"{base_url}/voyageurs/{voyageur_id}/",
-            f"{base_url}/users/voyageurs/{voyageur_id}/",
-            f"{base_url}/auth/voyageurs/{voyageur_id}/",
-        ]
-        
-        for endpoint in endpoints:
-            try:
-                logger.info(f"Trying to get voyageur by ID from: {endpoint}")
-                response = requests.get(endpoint, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.info(f"Found voyageur: {data}")
-                    return data
-            except requests.RequestException as e:
-                logger.debug(f"Endpoint {endpoint} failed: {e}")
-                continue
-        
-        logger.error(f"Could not find voyageur with id {voyageur_id} in any endpoint")
-        return None
+        try:
+            logger.info(f"Getting voyageur by ID from: {endpoint}")
+            headers = self._get_auth_headers()
+            
+            response = requests.get(endpoint, timeout=5, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Found voyageur: {data}")
+                return data
+            elif response.status_code == 401:
+                logger.error(f"Authentication failed when getting voyageur by ID: {response.status_code}")
+                return None
+            else:
+                logger.error(f"Failed to get voyageur by ID: {response.status_code} - {response.text}")
+                return None
+                
+        except requests.RequestException as e:
+            logger.error(f"Error getting voyageur with id {voyageur_id}: {e}")
+            return None
     
     def get_passenger(self, passenger_id: int) -> Optional[Dict]:
         """Get passenger info by ID"""
         base_url = self._get_service_url()
+        endpoint = f"{base_url}/auth/passengers/{passenger_id}/"
         
-        # Try different possible endpoints
-        endpoints = [
-            f"{base_url}/api/passengers/{passenger_id}/",
-            f"{base_url}/passengers/{passenger_id}/",
-            f"{base_url}/users/passengers/{passenger_id}/",
-            f"{base_url}/auth/passengers/{passenger_id}/",
-        ]
-        
-        for endpoint in endpoints:
-            try:
-                logger.info(f"Trying to get passenger from: {endpoint}")
-                response = requests.get(endpoint, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.info(f"Found passenger: {data}")
-                    return data
-            except requests.RequestException as e:
-                logger.debug(f"Endpoint {endpoint} failed: {e}")
-                continue
-        
-        logger.error(f"Could not find passenger with id {passenger_id} in any endpoint")
-        return None
+        try:
+            logger.info(f"Getting passenger from: {endpoint}")
+            headers = self._get_auth_headers()
+            
+            response = requests.get(endpoint, timeout=5, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Found passenger: {data}")
+                return data
+            elif response.status_code == 401:
+                logger.error(f"Authentication failed when getting passenger: {response.status_code}")
+                return None
+            else:
+                logger.error(f"Failed to get passenger: {response.status_code} - {response.text}")
+                return None
+                
+        except requests.RequestException as e:
+            logger.error(f"Error getting passenger with id {passenger_id}: {e}")
+            return None
     
     def create_passenger(self, passenger_data: Dict, voyageur_id: int) -> Optional[Dict]:
         """Create a new passenger"""
         base_url = self._get_service_url()
+        endpoint = f"{base_url}/auth/passengers/create/"
         
         # Ensure voyageur_id is in the data
         passenger_data['voyageur'] = voyageur_id
         
-        # Try different possible endpoints
-        endpoints = [
-            f"{base_url}/api/passengers/",
-            f"{base_url}/api/passengers/create/",
-            f"{base_url}/passengers/",
-            f"{base_url}/users/passengers/",
-        ]
-        
-        for endpoint in endpoints:
-            try:
-                logger.info(f"Trying to create passenger at: {endpoint}")
-                logger.info(f"Passenger data: {passenger_data}")
-                
-                response = requests.post(
-                    endpoint, 
-                    json=passenger_data, 
-                    timeout=5,
-                    headers={'Content-Type': 'application/json'}
-                )
-                
-                if response.status_code in [200, 201]:
-                    data = response.json()
-                    logger.info(f"Created passenger: {data}")
-                    return data
-                else:
-                    logger.warning(f"Endpoint {endpoint} returned {response.status_code}: {response.text}")
+        try:
+            logger.info(f"Creating passenger at: {endpoint}")
+            logger.info(f"Passenger data: {passenger_data}")
+            
+            headers = self._get_auth_headers()
+            
+            response = requests.post(
+                endpoint, 
+                json=passenger_data, 
+                timeout=10,
+                headers=headers
+            )
+            
+            if response.status_code in [200, 201]:
+                data = response.json()
+                logger.info(f"Successfully created passenger: {data}")
+                return data
+            elif response.status_code == 400:
+                logger.error(f"Validation error creating passenger: {response.text}")
+                return None
+            elif response.status_code == 401:
+                logger.error(f"Authentication failed when creating passenger: {response.status_code}")
+                return None
+            elif response.status_code == 403:
+                logger.error(f"Authorization failed when creating passenger: {response.status_code}")
+                return None
+            else:
+                logger.error(f"Failed to create passenger: {response.status_code} - {response.text}")
+                return None
                     
-            except requests.RequestException as e:
-                logger.debug(f"Endpoint {endpoint} failed: {e}")
-                continue
-        
-        logger.error("Could not create passenger in any endpoint")
-        return None
+        except requests.RequestException as e:
+            logger.error(f"Error creating passenger: {e}")
+            return None
     
     def get_voyageur_passengers(self, voyageur_id: int) -> List[Dict]:
         """Get all passengers for a voyageur"""
         base_url = self._get_service_url()
+        endpoint = f"{base_url}/auth/passengers/by-voyageur/{voyageur_id}/"
         
-        # Try different possible endpoints
-        endpoints = [
-            f"{base_url}/api/passengers/by-voyageur/{voyageur_id}/",
-            f"{base_url}/passengers/by-voyageur/{voyageur_id}/",
-            f"{base_url}/users/passengers/by-voyageur/{voyageur_id}/",
-            f"{base_url}/auth/passengers/by-voyageur/{voyageur_id}/",
-        ]
-        
-        for endpoint in endpoints:
-            try:
-                logger.info(f"Trying to get passengers from: {endpoint}")
-                response = requests.get(endpoint, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
+        try:
+            logger.info(f"Getting passengers from: {endpoint}")
+            headers = self._get_auth_headers()
+            
+            response = requests.get(endpoint, timeout=5, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Handle both list response and paginated response
+                if isinstance(data, list):
                     logger.info(f"Found {len(data)} passengers")
-                    return data if isinstance(data, list) else data.get('results', [])
-            except requests.RequestException as e:
-                logger.debug(f"Endpoint {endpoint} failed: {e}")
-                continue
-        
-        logger.error(f"Could not find passengers for voyageur {voyageur_id} in any endpoint")
-        return []
+                    return data
+                elif isinstance(data, dict) and 'results' in data:
+                    logger.info(f"Found {len(data['results'])} passengers")
+                    return data['results']
+                else:
+                    logger.warning(f"Unexpected response format: {type(data)}")
+                    return []
+            elif response.status_code == 401:
+                logger.error(f"Authentication failed when getting passengers: {response.status_code}")
+                return []
+            else:
+                logger.error(f"Failed to get passengers: {response.status_code} - {response.text}")
+                return []
+                
+        except requests.RequestException as e:
+            logger.error(f"Error getting passengers for voyageur {voyageur_id}: {e}")
+            return []

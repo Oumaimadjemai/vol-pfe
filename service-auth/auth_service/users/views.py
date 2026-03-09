@@ -151,11 +151,11 @@ from .serializers import PassengerSerializer
 from .permissions import IsVoyageur
 class PassengerCreateView(generics.CreateAPIView):
     serializer_class = PassengerSerializer
-    permission_classes = [IsAuthenticated, IsVoyageur]
+    permission_classes = [IsAuthenticated]
 
 class PassengerListView(generics.ListAPIView):
     serializer_class = PassengerSerializer
-    permission_classes = [IsAuthenticated, IsVoyageur]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return Passenger.objects.filter(
@@ -164,7 +164,7 @@ class PassengerListView(generics.ListAPIView):
 
 class PassengerDetailView(generics.RetrieveAPIView):
     serializer_class = PassengerSerializer
-    permission_classes = [IsAuthenticated, IsVoyageur]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return Passenger.objects.filter(
@@ -172,7 +172,7 @@ class PassengerDetailView(generics.RetrieveAPIView):
         )
 class PassengerUpdateView(generics.UpdateAPIView):
     serializer_class = PassengerSerializer
-    permission_classes = [IsAuthenticated, IsVoyageur]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return Passenger.objects.filter(
@@ -181,7 +181,7 @@ class PassengerUpdateView(generics.UpdateAPIView):
 
 class PassengerDeleteView(generics.DestroyAPIView):
     serializer_class = PassengerSerializer
-    permission_classes = [IsAuthenticated, IsVoyageur]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return Passenger.objects.filter(
