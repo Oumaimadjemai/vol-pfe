@@ -97,7 +97,7 @@ class AmadeusService {
             }
             if (nonStop) {
                 flights = flights.filter(f => f.isDirect);
-            }
+        
 
             return {
                 success: true,
