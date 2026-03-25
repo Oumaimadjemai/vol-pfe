@@ -24,7 +24,7 @@ class AirportService {
         try {
             console.log(` Recherche d'aéroports: "${keyword}"`);
             
-            // Vérifier le cache (5 minutes)
+            // Vérifier le cache avant d'appeler l'API
             const cacheKey = `search_${keyword}_${max}`;
             if (this.cache.has(cacheKey)) {
                 const cached = this.cache.get(cacheKey);

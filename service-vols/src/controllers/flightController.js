@@ -1,50 +1,42 @@
 const amadeusService = require('../services/amadeusService');
+const airportService = require('../services/airportService');
 
 const flightController = {
     
-    // 1. RECHERCHE ALLER SIMPLE / ALLER-RETOUR
-    // ===========================================
+    // Recherche aller simple / aller-retour
     searchFlights: async (req, res) => {
         try {
-            const { 
-                origin, destination, departureDate, returnDate,
-                adults = 1, children = 0, infants = 0,
-                travelClass = 'ECONOMY',
-                nonStop = 'false', refundable = 'false', baggage = 'false',
-                currency = 'DZD'
-            } = req.query;
+            const params = {
+                origin: req.query.origin,
+                destination: req.query.destination,
+                departureDate: req.query.departureDate,
+                returnDate: req.query.returnDate,
+                adults: parseInt(req.query.adults) || 1,
+                children: parseInt(req.query.children) || 0,
+                infants: parseInt(req.query.infants) || 0,
+                travelClass: req.query.travelClass || 'ECONOMY',
+                nonStop: req.query.nonStop === 'true',
+                refundable: req.query.refundable === 'true',
+                baggage: req.query.baggage === 'true',
+                currency: req.query.currency || 'DZD'
+            };
 
-            if (!origin || !destination || !departureDate) {
+            if (!params.origin || !params.destination || !params.departureDate) {
                 return res.status(400).json({
                     success: false,
                     message: 'Paramètres requis: origin, destination, departureDate'
                 });
             }
 
-            console.log(' Recherche:', { origin, destination, departureDate, returnDate, adults, children, infants, travelClass, nonStop, refundable, baggage });
-
-            const result = await amadeusService.searchFlights({
-                origin: origin.toUpperCase(),
-                destination: destination.toUpperCase(),
-                departureDate,
-                returnDate: returnDate || null,
-                adults: parseInt(adults),
-                children: parseInt(children),
-                infants: parseInt(infants),
-                travelClass: travelClass.toUpperCase(),
-                nonStop: nonStop === 'true',
-                refundable: refundable === 'true',
-                baggage: baggage === 'true',
-                currency
-            });
-
+            const result = await amadeusService.searchFlights(params);
+            
             res.json({
                 success: true,
                 data: result
             });
 
         } catch (error) {
-            console.error(' Erreur searchFlights:', error);
+            console.error('Erreur searchFlights:', error);
             res.status(error.status || 500).json({
                 success: false,
                 message: error.message || 'Erreur lors de la recherche'
@@ -52,130 +44,100 @@ const flightController = {
         }
     },
 
-    // ===========================================
-    // 2. RECHERCHE MULTI-DESTINATION
+    // Recherche multi-destination 
 searchMultiDestination: async (req, res) => {
-    try {
-        const { 
-            flights, adults = 1, children = 0, infants = 0,
-            travelClass = 'ECONOMY',
-            nonStop = 'false', refundable = 'false', baggage = 'false',
-            currency = 'DZD'
-        } = req.body;
+  try {
+    console.log(" Corps de la requête reçu:", JSON.stringify(req.body, null, 2));
+    
+    // Extraire les données des passagers de manière flexible
+    let adults = 1, children = 0, infants = 0;
+    
+    // Format 1: { adults: 1, children: 0, infants: 0 }
+    if (req.body.adults !== undefined) {
+      adults = parseInt(req.body.adults) || 1;
+      children = parseInt(req.body.children) || 0;
+      infants = parseInt(req.body.infants) || 0;
+    }
+    // Format 2: { passengers: { adult: 1, child: 0, baby: 0 } }
+    else if (req.body.passengers) {
+      adults = parseInt(req.body.passengers.adult) || 1;
+      children = parseInt(req.body.passengers.child) || 0;
+      infants = parseInt(req.body.passengers.baby) || 0;
+    }
+    // Format 3: { passengers: { adults: 1, children: 0, infants: 0 } }
+    else if (req.body.passengers?.adults !== undefined) {
+      adults = parseInt(req.body.passengers.adults) || 1;
+      children = parseInt(req.body.passengers.children) || 0;
+      infants = parseInt(req.body.passengers.infants) || 0;
+    }
 
-        console.log(' Body reçu:', req.body);
+    // Extraire les options
+    const options = req.body.options || {};
+    
+    const requestData = {
+      flights: req.body.flights,
+      adults: adults,
+      children: children,
+      infants: infants,
+      travelClass: req.body.travelClass || 'ECONOMY',
+      nonStop: options.direct === true || req.body.nonStop === true || req.body.nonStop === 'true',
+      refundable: options.refundable === true || req.body.refundable === true || req.body.refundable === 'true',
+      baggage: options.baggage === true || req.body.baggage === true || req.body.baggage === 'true',
+      currency: req.body.currency || 'DZD'
+    };
 
-        if (!flights || !Array.isArray(flights) || flights.length < 2) {
-            return res.status(400).json({
+    console.log("Données transformées:", requestData);
+
+    if (!requestData.flights || !Array.isArray(requestData.flights) || requestData.flights.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Minimum 2 segments requis'
+      });
+    }
+
+    const result = await amadeusService.searchMultiDestination(requestData);
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error(' Erreur searchMultiDestination:', error);
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || 'Erreur recherche multi-destination'
+    });
+  }
+},
+
+    // Récupérer les aéroports
+    getAirports: async (req, res) => {
+        try {
+            const { search, popular = 'false' } = req.query;
+            
+            const airports = popular === 'true' 
+                ? await airportService.getPopularAirports()
+                : search?.length >= 2 
+                    ? await airportService.searchAirports(search)
+                    : await airportService.getPopularAirports();
+            
+            res.json({
+                success: true,
+                count: airports.length,
+                data: airports
+            });
+
+        } catch (error) {
+            console.error(' Erreur getAirports:', error);
+            res.status(500).json({
                 success: false,
-                message: 'Minimum 2 segments requis pour multi-destination'
+                message: error.message
             });
         }
+    },
 
-        // Formater les vols
-        const formattedFlights = flights.map((flight, index) => {
-            const origin = flight.origin || flight.from;
-            const destination = flight.destination || flight.to;
-            const departureDate = flight.date || flight.departureDate;
-
-            if (!origin || !destination || !departureDate) {
-                throw new Error(`Vol ${index + 1}: champs manquants`);
-            }
-
-            return {
-                origin: origin.toUpperCase(),
-                destination: destination.toUpperCase(),
-                departureDate
-            };
-        });
-
-        console.log(' Vols formatés:', formattedFlights);
-
-        //  APPEL AU SERVICE
-        const results = await amadeusService.searchMultiDestination(
-            formattedFlights,
-            { adults: parseInt(adults), children: parseInt(children), infants: parseInt(infants) },
-            travelClass.toUpperCase(),
-            {
-                nonStop: nonStop === 'true',
-                refundable: refundable === 'true',
-                baggage: baggage === 'true',
-                currency
-            }
-        );
-
-        //  GÉNÉRER LES COMBINAISONS
-        let combinations = [];
-        if (results && results.segments && results.segments.length > 0) {
-            combinations = await amadeusService.generateCombinations(results.segments);
-            console.log(` ${combinations.length} combinaisons générées`);
-        } else {
-            console.log(' Pas de segments à combiner');
-        }
-
-        // Retourner les résultats
-        res.json({
-            success: true,
-            data: {
-                tripType: "MULTI_DESTINATION",
-                searchParams: {
-                    flights: formattedFlights,
-                    passengers: { adults, children, infants },
-                    travelClass: travelClass.toUpperCase(),
-                    filters: { nonStop, refundable, baggage }
-                },
-                segments: results.segments || [],
-                combinations: combinations || [],
-                totalCombinations: combinations.length || 0
-            }
-        });
-
-    } catch (error) {
-        console.error(' Erreur searchMultiDestination:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Erreur recherche multi-destination'
-        });
-    }
-},
-
-//  RÉCUPÉRER LES AÉROPORTS 
-// ===========================================
-getAirports: async (req, res) => {
-    try {
-        const { search, popular = 'false' } = req.query;
-        
-        const airportService = require('../services/airportService');
-        
-        let airports;
-        if (popular === 'true') {
-            // Aéroports populaires
-            airports = await airportService.getPopularAirports();
-        } else if (search && search.length >= 2) {
-            // Recherche par mot-clé (minimum 2 caractères)
-            airports = await airportService.searchAirports(search, 20);
-        } else {
-            // Par défaut, retourner les populaires
-            airports = await airportService.getPopularAirports();
-        }
-        
-        res.json({
-            success: true,
-            count: airports.length,
-            data: airports
-        });
-        
-    } catch (error) {
-        console.error(' Erreur getAirports:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-},
-   
-    //  VÉRIFIER DISPONIBILITÉ
-    // ===========================================
+    // Vérifier disponibilité d'un vol
     checkAvailability: async (req, res) => {
         try {
             const { flightId } = req.params;
@@ -193,7 +155,9 @@ getAirports: async (req, res) => {
                 success: true,
                 data: availability
             });
+
         } catch (error) {
+            console.error('Erreur checkAvailability:', error);
             res.status(500).json({
                 success: false,
                 message: error.message
