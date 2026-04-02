@@ -222,32 +222,46 @@ class PassengerByVoyageurView(generics.ListAPIView):
         
         # If no permission, return empty queryset
         return Passenger.objects.none()
-from .models import User
-from .serializers import AdminCreateUserSerializer, UserSerializer
-from .permissions import IsAdminOrAgent
-
+# views.py - Mise à jour des vues utilisateur
+from .serializers import AdminCreateUserSerializer, UserSerializer, UserUpdateSerializer
 
 class UserCreateView(generics.CreateAPIView):
     serializer_class = AdminCreateUserSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
 
 class UserListView(generics.ListAPIView):
-    queryset = User.objects.all()
+    queryset = User.objects.all().order_by('-date_joined')
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
+
 class UserDetailView(generics.RetrieveAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
+
 class UserUpdateView(generics.UpdateAPIView):
     queryset = User.objects.all()
-    serializer_class = UserSerializer
+    serializer_class = UserUpdateSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
+
 class UserDeleteView(generics.DestroyAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
 
+# Ajout d'une vue pour mettre à jour les features d'un agent
+class UserFeaturesUpdateView(generics.UpdateAPIView):
+    queryset = User.objects.filter(role='agent')
+    serializer_class = UserUpdateSerializer
+    permission_classes = [IsAuthenticated, IsAdminOrAgent]
+    
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', True)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data={'features': request.data.get('features', [])}, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
 
 # views.py
 from rest_framework import generics, status
@@ -394,6 +408,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from .serializers import UserSerializer, VoyageurSerializer
 
+# Mise à jour de MeView
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
     
@@ -405,10 +420,15 @@ class MeView(APIView):
             'username': user.username,
             'role': user.role,
             'is_active': user.is_active,
+            'is_blocked': user.is_blocked,
+            'status': user.status,
+            'date_joined': user.date_joined.strftime("%Y-%m-%d"),
+            'last_login': user.last_login.strftime("%Y-%m-%d") if user.last_login else None,
+            'features': user.features if user.role == 'agent' else [],
         }
         
         # Add voyageur data if role is voyageur
         if user.role == 'voyageur' and hasattr(user, 'voyageur'):
             data['voyageur'] = VoyageurSerializer(user.voyageur).data
         
-        return Response(data)
+        return Response(data)   

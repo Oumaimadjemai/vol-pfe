@@ -42,6 +42,12 @@ spring:
             - Path=/service-vols/**
           filters:
             - StripPrefix=1
+        - id: ms-reservation-route
+          uri: lb://MS-RESERVATION
+          predicates:
+            - Path=/ms-reservation/**
+          filters:
+            - StripPrefix=1
 
 
 eureka:

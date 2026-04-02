@@ -29,7 +29,7 @@ urlpatterns = [
     path("users/<int:pk>/", UserDetailView.as_view()),
     path("users/<int:pk>/update/", UserUpdateView.as_view()),
     path("users/<int:pk>/delete/", UserDeleteView.as_view()),
-
+    path("users/<int:pk>/features/", UserFeaturesUpdateView.as_view(), name="user-features-update"),
     # Password
     path('password-reset/', PasswordResetRequestView.as_view(), name='password_reset'),
     path('password-reset/confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),

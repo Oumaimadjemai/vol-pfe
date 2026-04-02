@@ -1,6 +1,9 @@
+# models.py - Ajout des champs manquants
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from datetime import date
+from django.utils import timezone
+
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, role='voyageur', **extra_fields):
         if not email:
@@ -29,18 +32,54 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('agent', 'Agent'),
         ('voyageur', 'Voyageur'),
     )
+    
+    STATUS_CHOICES = (
+        ('active', 'Actif'),
+        ('inactive', 'Inactif'),
+        ('suspended', 'Suspendu'),
+    )
 
     email = models.EmailField(unique=True)
-    username = models.CharField(max_length=50,unique=True,null=True,blank=True)
+    username = models.CharField(max_length=50, unique=True, null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='voyageur')
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_blocked = models.BooleanField(default=False)
+    
+    # Nouveaux champs
+    date_joined = models.DateTimeField(default=timezone.now)
+    last_login = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # Features pour les agents (stockées en JSON)
+    features = models.JSONField(default=list, blank=True)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
 
     objects = UserManager()
+
+    @property
+    def status(self):
+        """Calculate user status based on is_active and is_blocked"""
+        if self.is_blocked:
+            return 'suspended'
+        if not self.is_active:
+            return 'inactive'
+        return 'active'
+    
+    @status.setter
+    def status(self, value):
+        """Set user status"""
+        if value == 'suspended':
+            self.is_blocked = True
+            self.is_active = False
+        elif value == 'inactive':
+            self.is_blocked = False
+            self.is_active = False
+        elif value == 'active':
+            self.is_blocked = False
+            self.is_active = True
 
     def __str__(self):
         return self.email
