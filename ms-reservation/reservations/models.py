@@ -160,9 +160,8 @@ class Payment(models.Model):
 
     PAYMENT_METHOD_CHOICES = (
         ("CARD", "Card"),
-        ("PAYPAL", "PayPal"),
-        ("BANK_TRANSFER", "Bank transfer"),
-        ("CASH", "Cash"),
+        ("CASH", "Cash (En espèces)"),
+        ("DELIVERY", "Delivery"),  # Fixed typo from DILEVERY to DELIVERY
     )
 
     reservation = models.OneToOneField(
@@ -192,7 +191,6 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"Payment {self.id}"
-
 
 class PriceConfirmation(models.Model):
     """Track Amadeus price confirmations"""

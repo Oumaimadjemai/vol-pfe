@@ -26,8 +26,12 @@ SECRET_KEY = 'django-insecure-g4j(-i5g0x&ey6!7u#k+5)=ndgiv&gn1&r*rz!%t^5*t4u)uu=
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTSALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    'vol-cyan.vercel.app',
+    '.vercel.app',  # This allows all vercel.app subdomains
+]
 
 # Application definition
 
@@ -79,11 +83,13 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  # Votre frontend React
     "http://127.0.0.1:3000",
+    "https://vol-cyan.vercel.app"
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://vol-cyan.vercel.app"
 ]
 CORS_ALLOW_HEADERS = ["*"]
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -114,7 +120,8 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 SOCIALACCOUNT_ADAPTER = "users.adapter.MySocialAccountAdapter"
-
+# FRONTEND_URL = 'https://vol-cyan.vercel.app'  # Update for production
+# ACCOUNT_LOGOUT_REDIRECT_URL = 'https://vol-cyan.vercel.app'
 # Ajoutez cette ligne avec vos autres settings
 FRONTEND_URL = 'http://localhost:3000'  # Changez avec l'URL de votre frontend
 ACCOUNT_LOGOUT_REDIRECT_URL = 'http://localhost:3000'
@@ -137,7 +144,7 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 # CSRF settings
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read CSRF token
-CSRF_TRUSTED_ORIGINS = ['http://localhost:3000']
+CSRF_TRUSTED_ORIGINS = ['http://localhost:3000', 'https://vol-cyan.vercel.app/']
 
 # Allauth settings
 ACCOUNT_AUTHENTICATED_LOGIN_REDIRECTS = True

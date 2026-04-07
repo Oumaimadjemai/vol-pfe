@@ -251,11 +251,29 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 # ==================== VOYAGEUR SERIALIZERS ====================
 
+# serializers.py - Corrected VoyageurSerializer
+
 class VoyageurSerializer(serializers.ModelSerializer):
+    """Basic Voyageur serializer with user email"""
+    email = serializers.EmailField(source='user.email', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    user_status = serializers.SerializerMethodField()
+    
     class Meta:
         model = Voyageur
-        exclude = ["user"]
-
+        # Use only 'fields' OR 'exclude', not both
+        fields = [
+            'id', 'email', 'username', 'user_status',
+            'nom', 'prenom', 'date_naissance', 'sexe', 'telephone',
+            'pays', 'wilaya', 'commune', 'num_passport', 'date_exp_passport',
+        ]
+    
+    def get_user_status(self, obj):
+        if obj.user.is_blocked:
+            return "suspended"
+        if not obj.user.is_active:
+            return "inactive"
+        return "active"
 class VoyageurDetailSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_username = serializers.CharField(source='user.username', read_only=True)

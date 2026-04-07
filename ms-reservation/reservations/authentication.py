@@ -82,9 +82,6 @@ class AuthServiceJWTAuthentication(authentication.BaseAuthentication):
         """
         # Try different possible endpoints
         endpoints = [
-            f"{self.auth_service_url}/api/me/",
-            f"{self.auth_service_url}/me/",
-            f"{self.auth_service_url}/users/me/",
             f"{self.auth_service_url}/auth/me/",
         ]
         

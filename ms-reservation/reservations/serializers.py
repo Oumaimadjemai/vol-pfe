@@ -94,10 +94,9 @@ class ReservationRequestSerializer(serializers.Serializer):
     )
     
     payment_method = serializers.ChoiceField(choices=[
-        ('CARD', 'Carte bancaire'),
-        ('PAYPAL', 'PayPal'),
-        ('BANK_TRANSFER', 'Virement bancaire'),
-        ('CASH', 'Espèces'),
+       ("CARD", "Card"),
+        ("CASH", "Cash (En espèces)"),
+        ("DELIVERY", "Delivery"), 
     ])
     
     def validate(self, data):
@@ -194,3 +193,135 @@ class ReservationListSerializer(serializers.ModelSerializer):
             'id', 'reservation_number', 'created_at', 'status',
             'trip_type', 'total_price', 'currency', 'amadeus_pnr'
         ]
+
+# Add to serializers.py
+
+class PassengerDetailSerializer(serializers.Serializer):
+    """Serializer for detailed passenger information"""
+    id = serializers.IntegerField()
+    nom = serializers.CharField()
+    prenom = serializers.CharField()
+    date_naissance = serializers.DateField()
+    sexe = serializers.CharField()
+    num_passport = serializers.CharField(required=False, allow_blank=True)
+    date_exp_passport = serializers.DateField(required=False, allow_null=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    telephone = serializers.CharField(required=False, allow_blank=True)
+    
+    class Meta:
+        fields = ['id', 'nom', 'prenom', 'date_naissance', 'sexe', 
+                  'num_passport', 'date_exp_passport', 'email', 'telephone']
+
+
+class FlightSegmentDetailSerializer(serializers.ModelSerializer):
+    """Detailed flight segment serializer with formatted times"""
+    departure_datetime = serializers.SerializerMethodField()
+    arrival_datetime = serializers.SerializerMethodField()
+    duration = serializers.SerializerMethodField()
+    airline_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = FlightSegment
+        fields = [
+            'id', 'segment_number', 'origin', 'destination',
+            'departure_date', 'departure_time', 'arrival_date', 'arrival_time',
+            'departure_datetime', 'arrival_datetime', 'duration',
+            'price', 'per_passenger_price', 'airline_name', 'flight_data'
+        ]
+    
+    def get_departure_datetime(self, obj):
+        return f"{obj.departure_date} {obj.departure_time}"
+    
+    def get_arrival_datetime(self, obj):
+        return f"{obj.arrival_date} {obj.arrival_time}"
+    
+    def get_duration(self, obj):
+        flight_data = obj.flight_data
+        if flight_data and 'duration' in flight_data:
+            return flight_data['duration']
+        return "N/A"
+    
+    def get_airline_name(self, obj):
+        flight_data = obj.flight_data
+        if flight_data and 'airline' in flight_data:
+            return flight_data['airline']
+        return "N/A"
+
+
+# serializers.py - Update the ReservationDetailSerializer
+
+# serializers.py - Update the ReservationDetailSerializer (remove cache)
+
+class ReservationDetailSerializer(serializers.ModelSerializer):
+    """Detailed reservation serializer with passengers and flight details"""
+    flight_segments = FlightSegmentDetailSerializer(many=True, read_only=True)
+    passengers = serializers.SerializerMethodField()
+    payment = PaymentSerializer(read_only=True)
+    total_passengers = serializers.SerializerMethodField()
+    can_cancel = serializers.SerializerMethodField()
+    can_modify = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Reservation
+        fields = [
+            'id', 'reservation_number', 'created_at', 'updated_at',
+            'status', 'trip_type', 'total_price', 'currency',
+            'amadeus_pnr', 'confirmation_date', 'expiry_date',
+            'flight_segments', 'passengers', 'payment',
+            'total_passengers', 'can_cancel', 'can_modify'
+        ]
+    
+    def get_passengers(self, obj):
+        """Get detailed passenger information from auth service"""
+        request = self.context.get('request')
+        if not request:
+            return []
+        
+        auth_client = request.META.get('auth_client')
+        if not auth_client:
+            return []
+        
+        # Get all passengers for the voyageur in ONE request
+        voyageur_passengers = auth_client.get_passengers_by_voyageur(obj.voyageur)
+        
+        if not voyageur_passengers:
+            return []
+        
+        # Create a map for quick lookup
+        passenger_map = {p.get('id'): p for p in voyageur_passengers}
+        
+        # Build response with reservation-specific info
+        passengers = []
+        for pr in obj.passenger_reservations.all():
+            passenger_data = passenger_map.get(pr.passenger)
+            if passenger_data:
+                passenger_info = {
+                    'id': passenger_data.get('id'),
+                    'nom': passenger_data.get('nom'),
+                    'prenom': passenger_data.get('prenom'),
+                    'date_naissance': passenger_data.get('date_naissance'),
+                    'sexe': passenger_data.get('sexe'),
+                    'num_passport': passenger_data.get('num_passport'),
+                    'date_exp_passport': passenger_data.get('date_exp_passport'),
+                    'email': passenger_data.get('email'),
+                    'telephone': passenger_data.get('telephone'),
+                    'seat_number': pr.seat_number,
+                    'check_in_status': pr.check_in_status,
+                    'baggage_quantity': pr.baggage_quantity,
+                    'price_paid': str(pr.price_paid) if pr.price_paid else None,
+                    'amadeus_traveler_id': pr.amadeus_traveler_id
+                }
+                passengers.append(passenger_info)
+        
+        return passengers
+    
+    def get_total_passengers(self, obj):
+        return obj.passenger_reservations.count()
+    
+    def get_can_cancel(self, obj):
+        """Check if reservation can be cancelled"""
+        return obj.status == 'CONFIRMED' and obj.confirmation_date
+    
+    def get_can_modify(self, obj):
+        """Check if reservation can be modified"""
+        return obj.status in ['PENDING_PRICE', 'PRICE_CONFIRMED']

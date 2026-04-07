@@ -1,15 +1,33 @@
 from django.apps import AppConfig
-import sys
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-class ReservationsConfig(AppConfig):
+class ReservationConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'reservations'
+    name = 'reservations'  # Replace with your app name
 
     def ready(self):
-        """Called when Django app is ready"""
-        # Only start Eureka client for runserver or gunicorn commands
-        if len(sys.argv) > 1 and sys.argv[1] in ['runserver', 'gunicorn']:
-            print("\n🚀 Initializing reservation service...")
-            from .eureka_client import start_eureka_client
-            start_eureka_client()
+        """Start Eureka client when Django app is ready"""
+        # Import here to avoid circular imports
+        from . import eureka_client
+        
+        # Only start in production-like environments
+        import os
+        import sys
+        
+        # Skip during migrations and tests
+        if 'migrate' in sys.argv or 'makemigrations' in sys.argv:
+            logger.info("Skipping Eureka client start during migrations")
+            return
+        
+        if 'test' in sys.argv:
+            logger.info("Skipping Eureka client start during tests")
+            return
+        
+        # Start Eureka client
+        try:
+            eureka_client.start_eureka_client()
+        except Exception as e:
+            logger.error(f"Failed to start Eureka client: {e}")

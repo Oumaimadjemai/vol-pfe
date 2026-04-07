@@ -46,4 +46,18 @@ urlpatterns = [
     path('reservations/<int:pk>/cancel_booking/', views.ReservationViewSet.as_view({
         'post': 'cancel_booking'
     })),
+    path('reservations/by-voyageur/<int:voyageur_id>/', 
+         views.ReservationViewSet.as_view({'get': 'get_by_voyageur'}),
+         name='reservations-by-voyageur'),
+    
+    path('reservations/my-reservations/', 
+         views.ReservationViewSet.as_view({'get': 'my_reservations'}),
+         name='my-reservations'),
+    
+    path('reservations/<int:pk>/full-details/', 
+         views.ReservationViewSet.as_view({'get': 'full_details'}),
+         name='reservation-full-details'),
+     path('reservations/admin/all/', 
+         views.ReservationViewSet.as_view({'get': 'admin_all_reservations'}),
+         name='admin-all-reservations'),
 ]

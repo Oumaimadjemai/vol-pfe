@@ -13,19 +13,22 @@ spring:
           '[/**]':
             allowedOrigins:
               - "http://localhost:3000"
+              - "https://vol-cyan.vercel.app"
             allowedMethods:
               - GET
               - POST
               - PUT
+              - PATCH
               - DELETE
               - OPTIONS
             allowedHeaders:
               - "*"
             allowCredentials: true
+            maxAge: 3600
       discovery:
         locator:
-         enabled: true
-         lower-case-service-id: true
+          enabled: true
+          lower-case-service-id: true
       routes:
         - id: auth-service-route
           uri: lb://AUTH-SERVICE
@@ -33,9 +36,6 @@ spring:
             - Path=/auth-service/**
           filters:
             - StripPrefix=1
-            - AddResponseHeader=Access-Control-Allow-Origin, http://localhost:3000
-            - AddResponseHeader=Access-Control-Allow-Methods, GET,POST,PUT,DELETE,OPTIONS
-            - AddResponseHeader=Access-Control-Allow-Headers, *
         - id: service-vols-route
           uri: lb://SERVICE-VOLS
           predicates:
@@ -48,7 +48,6 @@ spring:
             - Path=/ms-reservation/**
           filters:
             - StripPrefix=1
-
 
 eureka:
   client:
