@@ -11,7 +11,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
-
+from decouple import config
+import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -25,8 +26,12 @@ SECRET_KEY = 'django-insecure-g4j(-i5g0x&ey6!7u#k+5)=ndgiv&gn1&r*rz!%t^5*t4u)uu=
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTSALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    'vol-cyan.vercel.app',
+    '.vercel.app',  # This allows all vercel.app subdomains
+]
 
 # Application definition
 
@@ -38,16 +43,31 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework.authtoken',
     'corsheaders',
     'users',
+    "django.contrib.sites",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "dj_rest_auth",
+    "dj_rest_auth.registration",
 ]
+TOKEN_MODEL = None
+REST_USE_JWT = True
+SITE_ID = 1
 AUTH_USER_MODEL = 'users.User'
+SOCIALACCOUNT_ADAPTER = "users.adapter.MySocialAccountAdapter"
 
 AUTHENTICATION_BACKENDS = [
-    'users.auth_backend.EmailOrUsernameBackend'
+    'users.auth_backend.EmailOrUsernameBackend',
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware', 
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -55,8 +75,84 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'allauth.account.middleware.AccountMiddleware'
 ]
-CORS_ALLOW_ALL_ORIGINS = True
+# auth_service/settings.py
+
+# Assurez-vous que ces settings sont configurés
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # Votre frontend React
+    "http://127.0.0.1:3000",
+    "https://vol-cyan.vercel.app"
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://vol-cyan.vercel.app"
+]
+CORS_ALLOW_HEADERS = ["*"]
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+# Pour permettre les cookies cross-origin en développement
+CORS_ALLOW_CREDENTIALS = True
+
+# Session settings
+SESSION_COOKIE_SAMESITE = 'Lax'  # ou 'None' en production avec HTTPS
+SESSION_COOKIE_SECURE = False  # True en production avec HTTPS
+# Google OAuth2
+SOCIALACCOUNT_LOGIN_ON_GET = True
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "SCOPE": [
+            "profile",
+            "email",
+        ],
+        "AUTH_PARAMS": {
+            "access_type": "online",
+        },
+        "OAUTH_PKCE_ENABLED": True,
+        "APP": {
+            "client_id": config("GOOGLE_CLIENT_ID"),
+            "secret": config("GOOGLE_CLIENT_SECRET"),
+            "key": ""
+        }
+    }
+}
+SOCIALACCOUNT_ADAPTER = "users.adapter.MySocialAccountAdapter"
+# FRONTEND_URL = 'https://vol-cyan.vercel.app'  # Update for production
+# ACCOUNT_LOGOUT_REDIRECT_URL = 'https://vol-cyan.vercel.app'
+# Ajoutez cette ligne avec vos autres settings
+FRONTEND_URL = 'http://localhost:3000'  # Changez avec l'URL de votre frontend
+ACCOUNT_LOGOUT_REDIRECT_URL = 'http://localhost:3000'
+# Assurez-vous que ces settings sont présents
+LOGIN_REDIRECT_URL = '/auth/google-success/'
+# In settings.py
+ACCOUNT_EMAIL_VERIFICATION = 'none'  # For development
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_AUTHENTICATION_METHOD = 'email'
+ACCOUNT_USERNAME_REQUIRED = False
+# Session settings - CRITICAL for OAuth
+SESSION_COOKIE_AGE = 1209600  # 2 weeks in seconds
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_NAME = 'sessionid'
+SESSION_COOKIE_SAMESITE = 'Lax'  # Important for OAuth redirects
+SESSION_COOKIE_SECURE = False  # Set to True only in production with HTTPS
+SESSION_SAVE_EVERY_REQUEST = True  # This ensures session is saved on every request
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+
+# CSRF settings
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read CSRF token
+CSRF_TRUSTED_ORIGINS = ['http://localhost:3000', 'https://vol-cyan.vercel.app/']
+
+# Allauth settings
+ACCOUNT_AUTHENTICATED_LOGIN_REDIRECTS = True
+ACCOUNT_LOGOUT_ON_GET = True
+SOCIALACCOUNT_LOGIN_ON_GET = True
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+# Critical: Set the login redirect URL
 from datetime import timedelta
 
 REST_FRAMEWORK = {
@@ -96,8 +192,7 @@ WSGI_APPLICATION = 'auth_service.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-from decouple import config
-import dj_database_url
+
 
 DATABASES = {
     'default': {
@@ -117,21 +212,21 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
-]
-
+# AUTH_PASSWORD_VALIDATORS = [
+#     {
+#         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+#     },
+#     {
+#         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+#     },
+#     {
+#         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+#     },
+#     {
+#         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+#     },
+# ]
+AUTH_PASSWORD_VALIDATORS = []
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
@@ -149,3 +244,18 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# settings.py
+from decouple import config
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_USER')
+EMAIL_HOST_PASSWORD = config('EMAIL_PASSWORD')
+DEFAULT_FROM_EMAIL = config('EMAIL_USER')
+
+
+INSTALLED_APPS.remove('corsheaders')
+MIDDLEWARE.remove('corsheaders.middleware.CorsMiddleware')
