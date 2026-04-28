@@ -1,29 +1,30 @@
 from rest_framework import status, viewsets, permissions
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.utils import timezone
 from datetime import datetime, timedelta, date
 import logging
-import re
 from typing import List, Dict, Optional
 from .models import Reservation, FlightSegment, Payment, PriceConfirmation, PassengerReservation
 from .serializers import *
 from .services import AuthServiceClient
-from .amadeus_client import AmadeusService
+from .skyscanner_booking import skyscanner_booking_service
 from .authentication import AuthServiceJWTAuthentication
+from django.http import HttpResponse
+from .skyscanner_booking import skyscanner_booking_service  # Use only skyscanner
 
 logger = logging.getLogger(__name__)
 
 
 class ReservationViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing reservations with Amadeus integration"""
+    """ViewSet for managing reservations with Skyscanner integration"""
     queryset = Reservation.objects.all()
     authentication_classes = [AuthServiceJWTAuthentication]
     permission_classes = [permissions.IsAuthenticated]
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.amadeus_service = AmadeusService()
         self.auth_client = None
 
     def get_auth_client(self):
@@ -36,19 +37,23 @@ class ReservationViewSet(viewsets.ModelViewSet):
             return ReservationListSerializer
         return ReservationSerializer
     
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['auth_client'] = self.get_auth_client()
+        return context
+    
+    def list(self, request, *args, **kwargs):
+        request.META['auth_client'] = self.get_auth_client()
+        return super().list(request, *args, **kwargs)
+    
     def get_queryset(self):
-        """Filter reservations by current voyageur, or return all for admin"""
         user = self.request.user
-        
-        # Check if user is admin - check role field from auth service
         is_admin = False
         
-        # Check for Django staff/superuser flags
         if hasattr(user, 'is_staff') and user.is_staff:
             is_admin = True
         elif hasattr(user, 'is_superuser') and user.is_superuser:
             is_admin = True
-        # Check for role field from your auth service
         elif hasattr(user, 'role') and user.role == 'admin':
             is_admin = True
         
@@ -56,7 +61,6 @@ class ReservationViewSet(viewsets.ModelViewSet):
             logger.info(f"Admin user {user.id} fetching all reservations")
             return Reservation.objects.all().order_by('-created_at')
         
-        # Regular users see only their own reservations
         if hasattr(user, 'voyageur_id') and user.voyageur_id:
             logger.info(f"Filtering reservations for voyageur_id: {user.voyageur_id}")
             return Reservation.objects.filter(voyageur=user.voyageur_id)
@@ -73,46 +77,118 @@ class ReservationViewSet(viewsets.ModelViewSet):
         return Reservation.objects.none()
     
     def create(self, request, *args, **kwargs):
-        """Step 1: Create initial reservation with price confirmation"""
+        """Step 1: Create reservation with Skyscanner flight data"""
         logger.info(f"Creating reservation with data: {request.data}")
-        
-        passengers_count = len(request.data.get('passengers', [])) + len(request.data.get('existing_passenger_ids', []))
-        
+
+        passengers_count = (
+            len(request.data.get('passengers', [])) +
+            len(request.data.get('existing_passenger_ids', []))
+        )
+
         serializer = ReservationRequestSerializer(
             data=request.data,
-            context={'passengers_count': passengers_count}
+            context={'passengers_count': max(passengers_count, 1)}
         )
-        
+
         if not serializer.is_valid():
             logger.error(f"Validation errors: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         data = serializer.validated_data
         user = request.user
         auth_client = self.get_auth_client()
-        
+
         try:
+            # Resolve voyageur_id
             voyageur_id = None
-            
+            voyageur_profile = None
+
             if hasattr(user, 'voyageur_id') and user.voyageur_id:
                 voyageur_id = user.voyageur_id
-                logger.info(f"Using voyageur_id {voyageur_id} from authenticated user")
             else:
-                voyageur_data = auth_client.get_voyageur_by_user_id(user.id)
-                if voyageur_data:
-                    voyageur_id = voyageur_data.get('id')
-                    logger.info(f"Fetched voyageur_id {voyageur_id} from auth service")
-            
+                voyageur_profile = auth_client.get_voyageur_by_user_id(user.id)
+                if voyageur_profile:
+                    voyageur_id = voyageur_profile.get('id')
+
             if not voyageur_id:
                 return Response(
                     {'error': 'Voyageur non trouvé'},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            
+
+            # Build passenger ID list
+            explicit_new = data.get('passengers', [])
+            existing_ids = list(data.get('existing_passenger_ids', []))
+            total_passengers = len(explicit_new) + len(existing_ids)
+
+            passenger_ids = []
+
+            if total_passengers == 0:
+                # Solo booking
+                if voyageur_profile is None:
+                    voyageur_profile = auth_client.get_voyageur_by_id(voyageur_id)
+
+                if not voyageur_profile:
+                    return Response(
+                        {'error': 'Impossible de récupérer le profil voyageur'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+                passenger_payload = {
+                    'nom': voyageur_profile.get('nom', ''),
+                    'prenom': voyageur_profile.get('prenom', ''),
+                    'date_naissance': voyageur_profile.get('date_naissance', ''),
+                    'sexe': voyageur_profile.get('sexe', 'homme'),
+                    'num_passport': voyageur_profile.get('num_passport', ''),
+                    'date_exp_passport': voyageur_profile.get('date_exp_passport'),
+                    'voyageur': voyageur_id,
+                }
+
+                passenger_payload = {k: v for k, v in passenger_payload.items() if v}
+                passenger_payload['voyageur'] = voyageur_id
+
+                created = auth_client.create_passenger(passenger_payload, voyageur_id)
+                if not created:
+                    return Response(
+                        {'error': 'Impossible de créer le passager depuis le profil voyageur'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+                passenger_ids.append(created['id'])
+                logger.info(f"Solo booking — created passenger {created['id']}")
+
+            else:
+                # Multi-passenger booking
+                passenger_ids.extend(existing_ids)
+
+                for pdata in explicit_new:
+                    allowed = [
+                        'nom', 'prenom', 'date_naissance', 'sexe',
+                        'num_passport', 'date_exp_passport',
+                    ]
+                    payload = {k: pdata[k] for k in allowed if k in pdata}
+                    if isinstance(payload.get('date_naissance'), date):
+                        payload['date_naissance'] = payload['date_naissance'].isoformat()
+                    if isinstance(payload.get('date_exp_passport'), date):
+                        payload['date_exp_passport'] = payload['date_exp_passport'].isoformat()
+
+                    created = auth_client.create_passenger(payload, voyageur_id)
+                    if created:
+                        passenger_ids.append(created['id'])
+                        logger.info(f"Created passenger {created['id']}")
+                    else:
+                        logger.error(f"Failed to create passenger: {payload}")
+
+                if not passenger_ids:
+                    return Response(
+                        {'error': 'Aucun passager valide n\'a pu être créé'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            # Create reservation
             total_price = sum(
                 flight['price']['total'] for flight in data['selected_flights']
             )
-            
+
             reservation = Reservation.objects.create(
                 voyageur=voyageur_id,
                 trip_type=data['trip_type'],
@@ -122,143 +198,58 @@ class ReservationViewSet(viewsets.ModelViewSet):
                 status='PENDING_PRICE',
                 original_offer=data['selected_flights'][0]
             )
-            
+
+            # Flight segments
             for idx, flight in enumerate(data['selected_flights'], 1):
-                departure_time_str = flight['departure']['time'].replace('Z', '+00:00')
-                arrival_time_str = flight['arrival']['time'].replace('Z', '+00:00')
-                
-                departure_datetime = datetime.fromisoformat(departure_time_str)
-                arrival_datetime = datetime.fromisoformat(arrival_time_str)
-                
                 FlightSegment.objects.create(
                     reservation=reservation,
                     segment_number=idx,
                     origin=flight['departure']['airport'],
                     destination=flight['arrival']['airport'],
-                    departure_date=departure_datetime.date(),
-                    departure_time=departure_datetime.time(),
-                    arrival_date=arrival_datetime.date(),
-                    arrival_time=arrival_datetime.time(),
+                    departure_date=datetime.strptime(flight['departure']['time'][:10], '%Y-%m-%d').date(),
+                    departure_time=datetime.strptime(flight['departure']['time'][11:16], '%H:%M').time(),
+                    arrival_date=datetime.strptime(flight['arrival']['time'][:10], '%Y-%m-%d').date(),
+                    arrival_time=datetime.strptime(flight['arrival']['time'][11:16], '%H:%M').time(),
                     flight_data=flight,
                     price=flight['price']['total'],
-                    per_passenger_price=flight['price']['perPassenger']
+                    per_passenger_price=flight['price']['perPassenger'] or flight['price']['total']
                 )
-            
-            passenger_ids = list(data.get('existing_passenger_ids', []))
-            
-            for passenger_data in data.get('passengers', []):
-                allowed_fields = [
-                    "nom", "prenom", "date_naissance", "sexe",
-                    "num_passport", "date_exp_passport"
-                ]
-                
-                passenger_data_for_api = {
-                    key: passenger_data[key]
-                    for key in allowed_fields
-                    if key in passenger_data
-                }
-                
-                passenger_data_for_api["voyageur"] = voyageur_id
-                
-                if 'date_naissance' in passenger_data_for_api:
-                    if isinstance(passenger_data_for_api['date_naissance'], date):
-                        passenger_data_for_api['date_naissance'] = passenger_data_for_api['date_naissance'].isoformat()
-                
-                if 'date_exp_passport' in passenger_data_for_api and passenger_data_for_api['date_exp_passport']:
-                    if isinstance(passenger_data_for_api['date_exp_passport'], date):
-                        passenger_data_for_api['date_exp_passport'] = passenger_data_for_api['date_exp_passport'].isoformat()
-                
-                logger.info(f"Sending passenger data to auth service: {passenger_data_for_api}")
-                
-                created_passenger = auth_client.create_passenger(
-                    passenger_data_for_api,
-                    voyageur_id
-                )
-                
-                if created_passenger:
-                    passenger_ids.append(created_passenger['id'])
-                    logger.info(f"Successfully created passenger with ID: {created_passenger['id']}")
-                else:
-                    logger.error(f"Failed to create passenger: {passenger_data_for_api}")
-            
-            if not passenger_ids:
-                return Response(
-                    {'error': 'Aucun passager valide n\'a pu être créé'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            for passenger_id in passenger_ids:
-                price_paid = total_price / len(passenger_ids) if passenger_ids else 0
-                baggage_quantity = data['selected_flights'][0].get('baggage', {}).get('quantity', 0)
-                
+
+            # PassengerReservation links
+            price_per_pax = total_price / len(passenger_ids)
+            baggage_qty = data['selected_flights'][0].get('baggage', {}).get('quantity', 0)
+
+            for pid in passenger_ids:
                 PassengerReservation.objects.create(
                     reservation=reservation,
-                    passenger=passenger_id,
-                    price_paid=price_paid,
-                    baggage_quantity=baggage_quantity
+                    passenger=pid,
+                    price_paid=price_per_pax,
+                    baggage_quantity=baggage_qty
                 )
-            
+
+            # Payment
             Payment.objects.create(
                 reservation=reservation,
                 amount=total_price,
                 currency=reservation.currency,
                 payment_method=data['payment_method']
             )
-            
-            response_serializer = ReservationSerializer(reservation)
+
             return Response(
-                response_serializer.data,
+                ReservationSerializer(reservation).data,
                 status=status.HTTP_201_CREATED
             )
-            
+
         except Exception as e:
-            logger.error(f"Error creating reservation: {str(e)}", exc_info=True)
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error creating reservation: {e}", exc_info=True)
             return Response(
                 {'error': f'Erreur lors de la création: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    def _get_valid_amadeus_offer(self, reservation: Reservation) -> Optional[Dict]:
-        """Récupère une offre Amadeus valide"""
-        try:
-            search_params = reservation.search_params
-            currency = 'DZD'
-            
-            amadeus_params = {
-                'originLocationCode': search_params.get('origin'),
-                'destinationLocationCode': search_params.get('destination'),
-                'departureDate': search_params.get('departureDate'),
-                'adults': search_params.get('adults', 1),
-                'children': search_params.get('children', 0),
-                'infants': search_params.get('infants', 0),
-                'travelClass': search_params.get('travelClass', 'ECONOMY'),
-                'currencyCode': currency,
-                'max': 10
-            }
-            
-            if reservation.trip_type == 'ALLER_RETOUR' and search_params.get('returnDate'):
-                amadeus_params['returnDate'] = search_params.get('returnDate')
-            
-            logger.info(f"Searching for fresh Amadeus offers with params: {amadeus_params}")
-            
-            fresh_offers = self.amadeus_service.client.search_flights(amadeus_params)
-            
-            if not fresh_offers:
-                logger.warning("No offers found in Amadeus search")
-                return None
-            
-            logger.info(f"Found {len(fresh_offers)} offers from Amadeus")
-            return fresh_offers[0]
-            
-        except Exception as e:
-            logger.error(f"Error getting valid Amadeus offer: {e}")
-            return None
-
     @action(detail=True, methods=['post'])
     def confirm_price(self, request, pk=None):
-        """Step 2: Confirm price with Amadeus"""
+        """Step 2: Confirm price for Skyscanner booking"""
         reservation = self.get_object()
         
         if reservation.status not in ['PENDING_PRICE', 'FAILED']:
@@ -268,55 +259,36 @@ class ReservationViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            amadeus_offer = self._get_valid_amadeus_offer(reservation)
+            original_flight = reservation.original_offer
             
-            if not amadeus_offer:
+            if not original_flight:
                 return Response(
                     {
-                        'error': 'Aucun vol disponible pour ces critères',
+                        'error': 'Aucune donnée de vol disponible',
                         'action': 'RECHERCHER_NOUVEAU_VOL',
                         'message': 'Veuillez effectuer une nouvelle recherche de vols'
                     },
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            logger.info(f"Using Amadeus offer: {amadeus_offer.get('id')}")
+            new_price = float(reservation.total_price)
+            currency = reservation.currency
             
-            confirmed_offer = self.amadeus_service.client.confirm_flight_offer(amadeus_offer)
-            
-            if not confirmed_offer:
-                return Response(
-                    {
-                        'error': 'Impossible de confirmer le prix',
-                        'action': 'RECHERCHER_NOUVEAU_VOL',
-                        'message': 'Veuillez réessayer'
-                    },
-                    status=status.HTTP_409_CONFLICT
-                )
-            
-            new_price = float(confirmed_offer.get('flightOffers', [{}])[0]
-                            .get('price', {})
-                            .get('grandTotal', 0))
-            
-            currency = confirmed_offer.get('flightOffers', [{}])[0] \
-                                  .get('price', {}) \
-                                  .get('currency', 'DZD')
-            
-            logger.info(f"New price confirmed: {new_price} {currency}")
+            logger.info(f"Price confirmed for Skyscanner booking: {new_price} {currency}")
             
             price_confirmation = PriceConfirmation.objects.create(
                 reservation=reservation,
                 offered_price=reservation.total_price,
                 confirmed_price=new_price,
                 currency=currency,
-                confirmed_offer=confirmed_offer,
-                expires_at=timezone.now() + timedelta(minutes=5)
+                confirmed_offer=reservation.original_offer,
+                expires_at=timezone.now() + timedelta(minutes=30)
             )
             
             reservation.status = 'PRICE_CONFIRMED'
             reservation.last_confirmed_price = new_price
             reservation.price_confirmed_at = timezone.now()
-            reservation.confirmed_offer = confirmed_offer
+            reservation.confirmed_offer = reservation.original_offer
             reservation.expiry_date = price_confirmation.expires_at
             reservation.total_price = new_price
             reservation.currency = currency
@@ -335,13 +307,11 @@ class ReservationViewSet(viewsets.ModelViewSet):
                 'message': 'Prix confirmé avec succès',
                 'reservation': ReservationSerializer(reservation).data,
                 'price_confirmation': PriceConfirmationSerializer(price_confirmation).data,
-                'warning': 'Cette confirmation expire dans 5 minutes'
+                'warning': 'Cette confirmation expire dans 30 minutes'
             })
             
         except Exception as e:
             logger.error(f"Error confirming price: {str(e)}", exc_info=True)
-            import traceback
-            traceback.print_exc()
             return Response(
                 {'error': f'Erreur lors de la confirmation: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -349,94 +319,85 @@ class ReservationViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def book(self, request, pk=None):
-        """Step 3: Book with Amadeus after price confirmation"""
+        """Step 3: Create booking with Skyscanner (simulated)"""
         reservation = self.get_object()
         auth_client = self.get_auth_client()
-       
-        logger.info(f"Booking attempt for reservation {reservation.id} with status: {reservation.status}")
-       
+
         if reservation.status == 'FAILED':
-            return Response(
-                {
-                    'error': 'Cette réservation a échoué précédemment',
-                    'action': 'RECONFIRMER_PRIX'
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-       
+            return Response({
+                'error': 'Cette réservation a échoué précédemment',
+                'action': 'RECONFIRMER_PRIX'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         if reservation.status != 'PRICE_CONFIRMED':
-            return Response(
-                {
-                    'error': f'Statut invalide: {reservation.status}',
-                    'expected': 'PRICE_CONFIRMED'
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-       
+            return Response({
+                'error': f'Statut invalide: {reservation.status}',
+                'expected': 'PRICE_CONFIRMED'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         latest_confirmation = reservation.price_confirmations.last()
-       
         if not latest_confirmation or not latest_confirmation.is_valid():
             reservation.status = 'EXPIRED'
             reservation.save()
-            return Response(
-                {'error': 'La confirmation de prix a expiré'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-       
+            return Response({
+                'error': 'La confirmation de prix a expiré',
+                'action': 'NOUVELLE_RECHERCHE'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
+            pr_list = list(reservation.passenger_reservations.all())
+
+            # Get voyageur contact info
+            voyageur_data = auth_client.get_voyageur_by_id(reservation.voyageur)
+            contact = {
+                'email': (voyageur_data.get('user', {}) or {}).get('email') if voyageur_data else None,
+                'telephone': voyageur_data.get('telephone') if voyageur_data else None,
+            }
+
+            # Get passengers data
+            passenger_ids = [pr.passenger for pr in pr_list]
+            passengers_by_id = auth_client.get_passengers_bulk(passenger_ids)
+
             passengers_data = []
-            for pr in reservation.passenger_reservations.all():
-                passenger_data = auth_client.get_passenger(pr.passenger)
-                if passenger_data:
-                    voyageur_data = auth_client.get_voyageur_by_id(reservation.voyageur)
-                    if voyageur_data:
-                        passenger_data['email'] = voyageur_data.get('user', {}).get('email')
-                        passenger_data['telephone'] = voyageur_data.get('telephone')
-                    passengers_data.append(passenger_data)
-            
+            for pr in pr_list:
+                p = passengers_by_id.get(pr.passenger)
+                if p:
+                    p['email'] = contact['email']
+                    p['telephone'] = contact['telephone']
+                    passengers_data.append(p)
+
             if not passengers_data:
                 return Response(
                     {'error': 'Aucun passager trouvé'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            # Effectuer la réservation
-            booking_result = self.amadeus_service.process_reservation(
-                reservation.confirmed_offer,
+
+            # Create booking with Skyscanner
+            booking_result = skyscanner_booking_service.create_booking_reference(
+                reservation.confirmed_offer or reservation.original_offer,
                 passengers_data
             )
-            
-            # Nettoyer le PNR
-            import re
-            clean_pnr = re.sub(r'[^A-Za-z0-9]', '', str(booking_result['pnr']))[:50]
-            
-            # Mettre à jour la réservation
+
+            clean_pnr = booking_result.get('id', f"SKY-{reservation.id}")
+
+            # Update reservation
             reservation.status = 'CONFIRMED'
             reservation.amadeus_pnr = clean_pnr
-            reservation.amadeus_booking_data = booking_result['booking']
+            reservation.amadeus_booking_data = booking_result
             reservation.confirmation_date = timezone.now()
             reservation.save()
-            
-            # Mettre à jour les IDs des voyageurs
-            travelers = booking_result['booking'].get('travelers', [])
-            for idx, pr in enumerate(reservation.passenger_reservations.all()):
-                if idx < len(travelers):
-                    pr.amadeus_traveler_id = travelers[idx].get('id')
-                    pr.save()
-            
-            # Mettre à jour le paiement
+
+            # Update payment
             try:
                 payment = reservation.payment
                 payment.status = 'COMPLETED'
                 payment.completed_at = timezone.now()
-                payment.transaction_id = f"AMADEUS-{clean_pnr}"
+                payment.transaction_id = f"SKYSCANNER-{clean_pnr}"
                 payment.save()
             except Payment.DoesNotExist:
                 pass
-            
-            # === RÉPONSE MINIMALISTE ===
+
             first_segment = reservation.flight_segments.first()
-            
             response_data = {
                 'message': 'Réservation confirmée avec succès',
                 'pnr': clean_pnr,
@@ -444,35 +405,35 @@ class ReservationViewSet(viewsets.ModelViewSet):
                 'payment_status': 'COMPLETED',
                 'total_price': f"{reservation.total_price} {reservation.currency}",
                 'passengers': len(passengers_data),
+                'booking_url': booking_result.get('booking_url'),
                 'flight': {
                     'origin': first_segment.origin,
                     'destination': first_segment.destination,
                     'date': str(first_segment.departure_date),
-                    'time': str(first_segment.departure_time)
+                    'time': str(first_segment.departure_time),
                 }
             }
-            
-            # Ajouter le vol retour si c'est un aller-retour
+
             if reservation.trip_type == 'ALLER_RETOUR' and reservation.flight_segments.count() > 1:
                 last_segment = reservation.flight_segments.last()
                 response_data['return_flight'] = {
                     'origin': last_segment.origin,
                     'destination': last_segment.destination,
                     'date': str(last_segment.departure_date),
-                    'time': str(last_segment.departure_time)
+                    'time': str(last_segment.departure_time),
                 }
-            
+
             return Response(response_data)
-            
+
         except Exception as e:
-            logger.error(f"Error booking: {str(e)}", exc_info=True)
+            logger.error(f"Error booking: {e}", exc_info=True)
             reservation.status = 'FAILED'
             reservation.save()
-            return Response(
-                {'error': 'Erreur lors de la réservation'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            ) 
-     
+            return Response({
+                'error': f'Erreur lors de la réservation: {str(e)}',
+                'action': 'RESEARCH'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
     @action(detail=True, methods=['post'])
     def retry_failed(self, request, pk=None):
         """Réessayer une réservation qui a échoué"""
@@ -493,251 +454,9 @@ class ReservationViewSet(viewsets.ModelViewSet):
             'action': 'CONFIRMER_PRIX'
         })
     
-    def _parse_flight_offers(self, offers_data: List[Dict]) -> List[Dict]:
-        """Parse raw Amadeus flight offers"""
-        parsed_offers = []
-        
-        for offer in offers_data[:10]:
-            try:
-                itinerary = offer['itineraries'][0]
-                segment = itinerary['segments'][0]
-                
-                price = float(offer['price']['total'])
-                
-                total_passengers = 0
-                for tp in offer['travelerPricings']:
-                    if tp['travelerType'] in ['ADULT', 'CHILD', 'INFANT']:
-                        total_passengers += 1
-                
-                per_passenger_price = price / total_passengers if total_passengers > 0 else price
-                
-                baggage_info = {'quantity': 0, 'included': 'Non spécifié'}
-                for traveler_pricing in offer.get('travelerPricings', []):
-                    for fare_detail in traveler_pricing.get('fareDetailsBySegment', []):
-                        if 'includedCheckedBags' in fare_detail:
-                            quantity = fare_detail['includedCheckedBags'].get('quantity', 0)
-                            baggage_info = {
-                                'quantity': quantity,
-                                'included': f"{quantity} bagage(s)" if quantity > 0 else "Non inclus"
-                            }
-                            break
-                
-                is_refundable = any(
-                    tp['fareDetailsBySegment'][0].get('isRefundable', False)
-                    for tp in offer['travelerPricings']
-                )
-                
-                flight_offer = {
-                    'flight_id': offer['id'],
-                    'airline': segment['carrierCode'],
-                    'flightNumber': segment['number'],
-                    'departure': {
-                        'airport': segment['departure']['iataCode'],
-                        'time': segment['departure']['at'],
-                        'terminal': segment['departure'].get('terminal', '')
-                    },
-                    'arrival': {
-                        'airport': segment['arrival']['iataCode'],
-                        'time': segment['arrival']['at'],
-                        'terminal': segment['arrival'].get('terminal', '')
-                    },
-                    'duration': self._format_duration(itinerary['duration']),
-                    'segments': [
-                        {
-                            'departure': {
-                                'airport': seg['departure']['iataCode'],
-                                'time': seg['departure']['at']
-                            },
-                            'arrival': {
-                                'airport': seg['arrival']['iataCode'],
-                                'time': seg['arrival']['at']
-                            },
-                            'airline': seg['carrierCode'],
-                            'flightNumber': seg['number'],
-                            'aircraft': seg['aircraft']['code'],
-                            'duration': seg['duration']
-                        }
-                        for seg in itinerary['segments']
-                    ],
-                    'price': {
-                        'total': price,
-                        'currency': offer['price']['currency'],
-                        'perPassenger': per_passenger_price
-                    },
-                    'baggage': baggage_info,
-                    'refundable': {
-                        'isRefundable': is_refundable,
-                        'policy': 'Remboursable' if is_refundable else 'Non remboursable'
-                    },
-                    'seatsAvailable': offer.get('numberOfBookableSeats', 0)
-                }
-                
-                parsed_offers.append(flight_offer)
-                
-            except Exception as e:
-                logger.error(f"Error parsing flight offer: {e}")
-                continue
-        
-        return parsed_offers
-    
-    def _format_duration(self, duration: str) -> str:
-        """Format ISO 8601 duration to human readable format"""
-        try:
-            duration = duration.replace('PT', '')
-            
-            hours = 0
-            minutes = 0
-            
-            if 'H' in duration:
-                hours_part = duration.split('H')[0]
-                hours = int(hours_part)
-                duration = duration.split('H')[1] if 'H' in duration else ''
-            
-            if 'M' in duration:
-                minutes_part = duration.split('M')[0]
-                minutes = int(minutes_part)
-            
-            if hours > 0 and minutes > 0:
-                return f"{hours}h {minutes}min"
-            elif hours > 0:
-                return f"{hours}h"
-            elif minutes > 0:
-                return f"{minutes}min"
-            else:
-                return duration
-        except:
-            return duration
-    
-    def _update_reservation_flight(self, reservation, new_flight_data):
-        """Update reservation with new flight data"""
-        try:
-            flight_segment = reservation.flight_segments.first()
-            
-            departure_time_str = new_flight_data['departure']['time'].replace('Z', '+00:00')
-            arrival_time_str = new_flight_data['arrival']['time'].replace('Z', '+00:00')
-            
-            departure_datetime = datetime.fromisoformat(departure_time_str)
-            arrival_datetime = datetime.fromisoformat(arrival_time_str)
-            
-            flight_segment.flight_data = new_flight_data
-            flight_segment.price = new_flight_data['price']['total']
-            flight_segment.per_passenger_price = new_flight_data['price']['perPassenger']
-            flight_segment.departure_date = departure_datetime.date()
-            flight_segment.departure_time = departure_datetime.time()
-            flight_segment.arrival_date = arrival_datetime.date()
-            flight_segment.arrival_time = arrival_datetime.time()
-            flight_segment.save()
-            
-            logger.info(f"Updated reservation {reservation.id} with new flight data")
-            
-        except Exception as e:
-            logger.error(f"Error updating reservation flight: {e}")
-            raise
-    
-    @action(detail=True, methods=['post'])
-    def select_alternative_flight(self, request, pk=None):
-        """Select an alternative flight when the original is unavailable"""
-        reservation = self.get_object()
-        
-        if reservation.status not in ['PENDING_PRICE', 'FAILED']:
-            return Response(
-                {'error': 'Cette réservation ne peut pas être modifiée'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        new_flight_data = request.data.get('flight')
-        if not new_flight_data:
-            return Response(
-                {'error': 'Nouveau vol non fourni'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            self._update_reservation_flight(reservation, new_flight_data)
-            
-            reservation.original_offer = new_flight_data
-            reservation.total_price = new_flight_data['price']['total']
-            reservation.currency = new_flight_data['price']['currency']
-            reservation.status = 'PENDING_PRICE'
-            reservation.save()
-            
-            try:
-                payment = reservation.payment
-                payment.amount = new_flight_data['price']['total']
-                payment.currency = new_flight_data['price']['currency']
-                payment.save()
-            except Payment.DoesNotExist:
-                pass
-            
-            return Response({
-                'message': 'Vol mis à jour avec succès. Veuillez confirmer le prix.',
-                'reservation': ReservationSerializer(reservation).data,
-                'action': 'CONFIRMER_PRIX'
-            })
-            
-        except Exception as e:
-            logger.error(f"Error selecting alternative flight: {str(e)}", exc_info=True)
-            return Response(
-                {'error': f'Erreur lors de la sélection: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-    
-    @action(detail=True, methods=['get'])
-    def booking_status(self, request, pk=None):
-        """Check booking status with Amadeus - Version simplifiée"""
-        reservation = self.get_object()
-       
-        if not reservation.amadeus_pnr:
-            return Response(
-                {'error': 'Pas de réservation Amadeus associée'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-       
-        try:
-            booking_data = self.amadeus_service.client.get_booking(reservation.amadeus_pnr)
-            
-            if not booking_data:
-                return Response(
-                    {'error': 'Réservation introuvable chez Amadeus'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            
-            # Extraire les informations essentielles
-            flight_offer = booking_data.get('flightOffers', [{}])[0]
-            first_segment = flight_offer.get('itineraries', [{}])[0].get('segments', [{}])[0]
-            
-            # Statut réel du vol
-            flight_status = first_segment.get('bookingStatus', 'UNKNOWN')
-            
-            # Prix
-            price = flight_offer.get('price', {})
-            
-            # Réponse minimaliste
-            return Response({
-                'pnr': reservation.amadeus_pnr,
-                'status': flight_status,
-                'total_price': f"{price.get('grandTotal', '0')} {price.get('currency', 'DZD')}",
-                'flight': {
-                    'from': first_segment.get('departure', {}).get('iataCode'),
-                    'to': first_segment.get('arrival', {}).get('iataCode'),
-                    'date': first_segment.get('departure', {}).get('at', '').split('T')[0],
-                    'time': first_segment.get('departure', {}).get('at', '').split('T')[1] if 'T' in first_segment.get('departure', {}).get('at', '') else '',
-                    'airline': first_segment.get('carrierCode'),
-                    'flight_number': first_segment.get('number')
-                },
-                'passengers': len(booking_data.get('travelers', []))
-            })
-            
-        except Exception as e:
-            logger.error(f"Error checking booking status: {str(e)}", exc_info=True)
-            return Response(
-                {'error': 'Erreur lors de la vérification'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-     
     @action(detail=True, methods=['post'])
     def cancel_booking(self, request, pk=None):
-        """Cancel a confirmed booking with Amadeus"""
+        """Cancel a confirmed booking in Skyscanner (simulated)"""
         reservation = self.get_object()
         
         if reservation.status != 'CONFIRMED':
@@ -748,12 +467,21 @@ class ReservationViewSet(viewsets.ModelViewSet):
         
         if not reservation.amadeus_pnr:
             return Response(
-                {'error': 'Pas de réservation Amadeus associée'},
+                {'error': 'Pas de PNR associé à cette réservation'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if flight hasn't departed
+        first_segment = reservation.flight_segments.first()
+        if first_segment and first_segment.departure_date < timezone.now().date():
+            return Response(
+                {'error': 'Impossible d\'annuler un vol déjà effectué'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         try:
-            cancelled = self.amadeus_service.client.cancel_booking(reservation.amadeus_pnr)
+            # Cancel in Skyscanner
+            cancelled = skyscanner_booking_service.cancel_booking(reservation.amadeus_pnr)
             
             if cancelled:
                 reservation.status = 'CANCELLED'
@@ -761,14 +489,20 @@ class ReservationViewSet(viewsets.ModelViewSet):
                 
                 try:
                     payment = reservation.payment
-                    payment.status = 'REFUNDED'
+                    payment.status = 'REFUND_PENDING'
                     payment.save()
                 except Payment.DoesNotExist:
                     pass
                 
                 return Response({
+                    'success': True,
                     'message': 'Réservation annulée avec succès',
-                    'reservation': ReservationSerializer(reservation).data
+                    'reservation_id': reservation.id,
+                    'reservation_number': reservation.reservation_number,
+                    'pnr': reservation.amadeus_pnr,
+                    'new_status': reservation.status,
+                    'payment_status': 'REFUND_PENDING',
+                    'next_step': 'Pour obtenir un remboursement, veuillez faire une demande de remboursement.'
                 })
             else:
                 return Response(
@@ -782,82 +516,10 @@ class ReservationViewSet(viewsets.ModelViewSet):
                 {'error': f'Erreur lors de l\'annulation: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-    # ========== NEW ENDPOINTS (INSIDE THE CLASS) ==========
     
-    @action(detail=False, methods=['get'], url_path='by-voyageur/(?P<voyageur_id>[^/.]+)')
-    def get_by_voyageur(self, request, voyageur_id=None):
-        """
-        Get all reservations for a specific voyageur with full details including passengers and flights.
-        """
-        logger.info(f"Fetching reservations for voyageur_id: {voyageur_id}")
-        
-        user = request.user
-        auth_client = self.get_auth_client()
-        
-        try:
-            current_voyageur = None
-            
-            if hasattr(user, 'voyageur_id') and user.voyageur_id:
-                current_voyageur = user.voyageur_id
-            else:
-                voyageur_data = auth_client.get_voyageur_by_user_id(user.id)
-                if voyageur_data:
-                    current_voyageur = voyageur_data.get('id')
-            
-            if str(current_voyageur) != str(voyageur_id):
-                logger.warning(f"User {user.id} attempted to access voyageur {voyageur_id} without permission")
-                return Response(
-                    {'error': 'Vous n\'avez pas accès à ces données'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            
-            reservations = Reservation.objects.filter(voyageur=voyageur_id).order_by('-created_at')
-            
-            if not reservations.exists():
-                return Response({
-                    'voyageur_id': voyageur_id,
-                    'total_reservations': 0,
-                    'reservations': []
-                }, status=status.HTTP_200_OK)
-            
-            request.META['auth_client'] = auth_client
-            
-            serializer = ReservationDetailSerializer(
-                reservations, 
-                many=True, 
-                context={'request': request}
-            )
-            
-            total_spent = sum(r.total_price for r in reservations)
-            confirmed_count = reservations.filter(status='CONFIRMED').count()
-            cancelled_count = reservations.filter(status='CANCELLED').count()
-            pending_count = reservations.filter(status__in=['PENDING_PRICE', 'PRICE_CONFIRMED']).count()
-            
-            response_data = {
-                'voyageur_id': voyageur_id,
-                'total_reservations': reservations.count(),
-                'statistics': {
-                    'total_spent': f"{total_spent} DZD",
-                    'confirmed': confirmed_count,
-                    'cancelled': cancelled_count,
-                    'pending': pending_count
-                },
-                'reservations': serializer.data
-            }
-            
-            return Response(response_data, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            logger.error(f"Error fetching reservations for voyageur {voyageur_id}: {str(e)}", exc_info=True)
-            return Response(
-                {'error': f'Erreur lors de la récupération des réservations: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
     @action(detail=False, methods=['get'], url_path='my-reservations')
     def my_reservations(self, request):
-        """Get current user's own reservations with full details."""
+        """Get current user's own reservations with full details"""
         logger.info(f"Fetching my reservations for user: {request.user.id}")
         
         user = request.user
@@ -925,67 +587,140 @@ class ReservationViewSet(viewsets.ModelViewSet):
                 {'error': f'Erreur lors de la récupération: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-     
-    @action(detail=True, methods=['get'], url_path='full-details')
-    def full_details(self, request, pk=None):
-        """Get complete details for a single reservation including passengers and flight info."""
-        reservation = self.get_object()
-        auth_client = self.get_auth_client()
-        
-        request.META['auth_client'] = auth_client
-        
-        serializer = ReservationDetailSerializer(
-            reservation, 
-            context={'request': request}
-        )
-        
-        return Response(serializer.data, status=status.HTTP_200_OK)
     
-    @action(detail=False, methods=['get'], url_path='admin/all')
-    def admin_all_reservations(self, request):
-        """Get all reservations for admin users (no filtering by voyageur)"""
-        logger.info(f"Fetching all reservations for admin user: {request.user.id}")
+    @action(detail=True, methods=['post'])
+    def request_refund(self, request, pk=None):
+        """Request a refund for a cancelled reservation"""
+        reservation = self.get_object()
+        reason = request.data.get('reason', '')
         
-        # Check if user is admin - check role field from auth service
-        user = request.user
-        is_admin = False
-        
-        # Check for Django staff/superuser flags
-        if hasattr(user, 'is_staff') and user.is_staff:
-            is_admin = True
-        elif hasattr(user, 'is_superuser') and user.is_superuser:
-            is_admin = True
-        # Check for role field from your auth service
-        elif hasattr(user, 'role') and user.role == 'admin':
-            is_admin = True
-        
-        if not is_admin:
+        if reservation.status != 'CANCELLED':
             return Response(
-                {'error': 'Accès non autorisé. Réservé aux administrateurs.'},
-                status=status.HTTP_403_FORBIDDEN
+                {'error': 'Seules les réservations annulées peuvent être remboursées'},
+                status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Get all reservations without filtering by voyageur
-        reservations = Reservation.objects.all().order_by('-created_at')
+        try:
+            payment = reservation.payment
+        except Payment.DoesNotExist:
+            return Response(
+                {'error': 'Aucun paiement trouvé pour cette réservation'},
+                status=status.HTTP_404_NOT_FOUND
+            )
         
-        # Paginate
-        page = self.paginate_queryset(reservations)
-        if page is not None:
-            serializer = ReservationListSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+        if payment.status == 'REFUNDED':
+            return Response(
+                {'error': 'Cette réservation a déjà été remboursée'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
-        serializer = ReservationListSerializer(reservations, many=True)
-        return Response(serializer.data)
+        try:
+            # Calculate refund amount
+            cancellation_fee_percentage = 10
+            refund_amount = float(payment.amount) * (100 - cancellation_fee_percentage) / 100
+            refund_transaction_id = f"REFUND-{reservation.reservation_number}-{int(timezone.now().timestamp())}"
+            
+            payment.status = 'REFUNDED'
+            payment.completed_at = timezone.now()
+            payment.transaction_id = refund_transaction_id
+            payment.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Demande de remboursement traitée avec succès',
+                'reservation_id': reservation.id,
+                'reservation_number': reservation.reservation_number,
+                'original_amount': float(payment.amount),
+                'refund_amount': refund_amount,
+                'cancellation_fee': float(payment.amount) - refund_amount,
+                'currency': payment.currency,
+                'transaction_id': refund_transaction_id,
+                'status': payment.status
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing refund: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f'Erreur lors du remboursement: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['get'])
+    def get_refund_eligibility(self, request, pk=None):
+        """Check if a reservation is eligible for refund"""
+        reservation = self.get_object()
+        
+        try:
+            payment = reservation.payment
+        except Payment.DoesNotExist:
+            return Response({
+                'eligible': False,
+                'reason': 'Aucun paiement trouvé'
+            })
+        
+        is_eligible = False
+        reason = None
+        refund_percentage = 0
+        
+        if reservation.status == 'CONFIRMED':
+            is_eligible = True
+            reason = 'Réservation confirmée - Annulation possible'
+            
+            first_segment = reservation.flight_segments.first()
+            if first_segment:
+                days_until_departure = (first_segment.departure_date - timezone.now().date()).days
+                
+                if days_until_departure > 30:
+                    refund_percentage = 100
+                    reason = 'Annulation plus de 30 jours avant départ - Remboursement total'
+                elif days_until_departure > 14:
+                    refund_percentage = 75
+                    reason = 'Annulation entre 15-30 jours avant départ - Remboursement 75%'
+                elif days_until_departure > 7:
+                    refund_percentage = 50
+                    reason = 'Annulation entre 8-14 jours avant départ - Remboursement 50%'
+                elif days_until_departure > 0:
+                    refund_percentage = 25
+                    reason = 'Annulation moins de 7 jours avant départ - Remboursement 25%'
+                else:
+                    reason = 'Vol déjà effectué - Non remboursable'
+                    is_eligible = False
+        elif reservation.status == 'CANCELLED':
+            if payment.status == 'REFUNDED':
+                reason = 'Déjà remboursée'
+            else:
+                is_eligible = True
+                refund_percentage = 100
+                reason = 'Réservation annulée - Remboursement possible'
+        else:
+            reason = f'Statut {reservation.status} - Non remboursable'
+        
+        return Response({
+            'eligible': is_eligible,
+            'reason': reason,
+            'refund_percentage': refund_percentage,
+            'status': reservation.status,
+            'payment_status': payment.status,
+            'total_amount': float(payment.amount),
+            'estimated_refund': float(payment.amount) * refund_percentage / 100 if is_eligible else 0,
+            'currency': payment.currency
+        })
 
 
-# This stays outside the class (module-level function)
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+# Test endpoints
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def test_auth(request):
+    return Response({
+        'authenticated': False,
+        'message': 'This endpoint is public.',
+        'status': 'ok'
+    })
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def test_auth(request):
-    """Test endpoint to verify authentication"""
+def test_auth_secure(request):
     user = request.user
     return Response({
         'authenticated': True,

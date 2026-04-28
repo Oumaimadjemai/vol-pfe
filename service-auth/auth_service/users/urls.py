@@ -16,6 +16,8 @@ urlpatterns = [
     path("voyageurs/by-user/<int:user_id>/", VoyageurByUserView.as_view(), name="voyageur-by-user"),
     path("voyageurs/<int:pk>/update/", VoyageurUpdateView.as_view(), name="voyageur-update"),
     path("voyageurs/<int:pk>/delete/", VoyageurDeleteView.as_view(), name="voyageur-delete"),
+    path('voyageurs/<int:pk>/passport/', VoyageurPassportUploadView.as_view()),
+    path('passengers/<int:pk>/passport/', PassengerPassportUploadView.as_view()),
     # Passenger CRUD
     path("passengers/", PassengerListView.as_view()),
     path("passengers/create/", PassengerCreateView.as_view()),

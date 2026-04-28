@@ -27,7 +27,7 @@ SECRET_KEY = config('SECRET_KEY', 'django-insecure-default-key-change-this')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -95,17 +95,19 @@ DATABASES = {
         }
     }
 }
-# CACHES = {
-#     'default': {
-#         'BACKEND': 'django_redis.cache.RedisCache',
-#         'LOCATION': config('REDIS_URL', 'redis://localhost:6379/0'),
-#         'OPTIONS': {
-#             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-#         }
-#     }
-# }
-
-
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": os.getenv("REDIS_URL", "redis://localhost:6379/1"),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "SOCKET_CONNECT_TIMEOUT": 2,
+            "SOCKET_TIMEOUT": 2,
+            "IGNORE_EXCEPTIONS": True,   # don't crash if Redis is down, fall through to HTTP
+        },
+        "TIMEOUT": 3600,
+    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -180,3 +182,13 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+
+# settings.py - Add these at the end
+
+# Service Vols (Node.js) Configuration
+SERVICE_VOLS_URL = os.getenv('SERVICE_VOLS_URL', 'http://localhost:3002')
+SERVICE_VOLS_TIMEOUT = int(os.getenv('SERVICE_VOLS_TIMEOUT', '30'))
+# ms-reservation/ms_reservation/settings.py
+
+AUTH_SERVICE_URL = os.getenv('AUTH_SERVICE_URL', 'http://service-auth:8000')
+AUTH_SERVICE_TIMEOUT = int(os.getenv('AUTH_SERVICE_TIMEOUT', '5'))

@@ -26,16 +26,13 @@ SECRET_KEY = 'django-insecure-g4j(-i5g0x&ey6!7u#k+5)=ndgiv&gn1&r*rz!%t^5*t4u)uu=
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTSALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    'vol-cyan.vercel.app',
-    '.vercel.app',  # This allows all vercel.app subdomains
-]
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 
 INSTALLED_APPS = [
+     'cloudinary_storage', 
+    'cloudinary',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -53,6 +50,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.google",
     "dj_rest_auth",
     "dj_rest_auth.registration",
+
 ]
 TOKEN_MODEL = None
 REST_USE_JWT = True
@@ -259,3 +257,33 @@ DEFAULT_FROM_EMAIL = config('EMAIL_USER')
 
 INSTALLED_APPS.remove('corsheaders')
 MIDDLEWARE.remove('corsheaders.middleware.CorsMiddleware')
+
+
+# service-auth/settings.py - Add these
+import os
+
+# Kafka Configuration
+KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', '127.0.0.1:9092')
+KAFKA_ENABLED = os.getenv('KAFKA_ENABLED', 'True') == 'True'
+
+# Media files for passport images
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+
+import cloudinary
+
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': config('CLOUDINARY_CLOUD_NAME'),
+    'API_KEY':    config('CLOUDINARY_API_KEY'),
+    'API_SECRET': config('CLOUDINARY_API_SECRET'),
+}
+
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+
+cloudinary.config(
+    cloud_name = config('CLOUDINARY_CLOUD_NAME'),
+    api_key    = config('CLOUDINARY_API_KEY'),
+    api_secret = config('CLOUDINARY_API_SECRET'),
+    secure     = True
+)

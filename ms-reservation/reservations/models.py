@@ -155,6 +155,7 @@ class Payment(models.Model):
         ("PENDING", "Pending"),
         ("COMPLETED", "Completed"),
         ("FAILED", "Failed"),
+        ("REFUND_PENDING", "Refund Pending"), 
         ("REFUNDED", "Refunded"),
     )
 

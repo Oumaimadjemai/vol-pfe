@@ -46,8 +46,8 @@ class PassengerInfoSerializer(serializers.Serializer):
 
 class FlightSelectionSerializer(serializers.Serializer):
     """Serializer for flight selection from frontend"""
-    flight_id = serializers.CharField(max_length=50)
-    airline = serializers.CharField(max_length=10)
+    flight_id = serializers.CharField(max_length=100)
+    airline = serializers.CharField(max_length=100)
     flightNumber = serializers.CharField(max_length=20)
     price = serializers.DictField()
     departure = serializers.DictField()
@@ -70,18 +70,13 @@ class FlightSelectionSerializer(serializers.Serializer):
 
 
 class ReservationRequestSerializer(serializers.Serializer):
-    """Main serializer for reservation creation"""
-    search_params = serializers.DictField()
-    trip_type = serializers.ChoiceField(choices=[
-        ('ALLER_SIMPLE', 'Aller simple'),
-        ('ALLER_RETOUR', 'Aller-retour'),
+    search_params   = serializers.DictField()
+    trip_type       = serializers.ChoiceField(choices=[
+        ('ALLER_SIMPLE',      'Aller simple'),
+        ('ALLER_RETOUR',      'Aller-retour'),
         ('MULTI_DESTINATION', 'Multi-destination'),
     ])
-    
-    selected_flights = serializers.ListField(
-        child=FlightSelectionSerializer()
-    )
-    
+    selected_flights = serializers.ListField(child=FlightSelectionSerializer())
     passengers = serializers.ListField(
         child=PassengerInfoSerializer(),
         required=False,
@@ -92,33 +87,34 @@ class ReservationRequestSerializer(serializers.Serializer):
         required=False,
         default=list
     )
-    
     payment_method = serializers.ChoiceField(choices=[
-       ("CARD", "Card"),
-        ("CASH", "Cash (En espèces)"),
-        ("DELIVERY", "Delivery"), 
+        ('CARD',     'Card'),
+        ('CASH',     'Cash (En espèces)'),
+        ('DELIVERY', 'Delivery'),
     ])
-    
+
     def validate(self, data):
-        passengers_count = len(data.get('passengers', [])) + len(data.get('existing_passenger_ids', []))
-        
-        if passengers_count == 0:
-            raise serializers.ValidationError("Au moins un passager est requis")
-        
+        explicit_count = (
+            len(data.get('passengers', [])) +
+            len(data.get('existing_passenger_ids', []))
+        )
+        # 0 is valid — means solo booking (voyageur = passenger)
+        # the view will auto-create the passenger from the voyageur profile
+
         for flight in data['selected_flights']:
-            if flight['seatsAvailable'] < passengers_count:
+            # seats check: count the voyageur too when explicit_count == 0
+            effective_count = explicit_count if explicit_count > 0 else 1
+            if flight['seatsAvailable'] < effective_count:
                 raise serializers.ValidationError(
                     f"Pas assez de sièges sur le vol {flight['flightNumber']}"
                 )
-        
+
         if data['trip_type'] == 'ALLER_SIMPLE' and len(data['selected_flights']) != 1:
             raise serializers.ValidationError(
                 "Un vol simple ne doit contenir qu'un seul segment"
             )
-        
+
         return data
-
-
 class PriceConfirmationSerializer(serializers.ModelSerializer):
     is_valid = serializers.BooleanField(read_only=True)
     
@@ -187,14 +183,111 @@ class ReservationSerializer(serializers.ModelSerializer):
 
 
 class ReservationListSerializer(serializers.ModelSerializer):
+    """Serializer for reservation list with voyageur and passenger info"""
+    voyageur_details = serializers.SerializerMethodField()
+    passenger_count = serializers.SerializerMethodField()
+    passenger_names = serializers.SerializerMethodField()
+    flight_origin = serializers.SerializerMethodField()
+    flight_destination = serializers.SerializerMethodField()
+    departure_date = serializers.SerializerMethodField()
+    
     class Meta:
         model = Reservation
         fields = [
-            'id', 'reservation_number', 'created_at', 'status',
-            'trip_type', 'total_price', 'currency', 'amadeus_pnr'
+            'id', 
+            'reservation_number', 
+            'created_at', 
+            'status',
+            'trip_type', 
+            'total_price', 
+            'currency', 
+            'amadeus_pnr',
+            'voyageur',
+            'voyageur_details',
+            'passenger_count',
+            'passenger_names',
+            'flight_origin',
+            'flight_destination',
+            'departure_date'
         ]
+    
+    def get_voyageur_details(self, obj):
+        """Get voyageur details from auth service"""
+        request = self.context.get('request')
+        if not request:
+            return None
+        
+        auth_client = request.META.get('auth_client')
+        if not auth_client:
+            return None
+        
+        try:
+            voyageur_data = auth_client.get_voyageur_by_id(obj.voyageur)
+            if voyageur_data:
+                return {
+                    'id': voyageur_data.get('id'),
+                    'nom': voyageur_data.get('nom'),
+                    'prenom': voyageur_data.get('prenom'),
+                    'email': voyageur_data.get('email'),
+                    'telephone': voyageur_data.get('telephone')
+                }
+        except Exception:
+            pass
+        
+        return None
+    
+    def get_passenger_count(self, obj):
+        """Get number of passengers for this reservation"""
+        return obj.passenger_reservations.count()
+    
+    def get_passenger_names(self, obj):
+        """Get passenger names from auth service"""
+        request = self.context.get('request')
+        if not request:
+            return []
+        
+        auth_client = request.META.get('auth_client')
+        if not auth_client:
+            return []
+        
+        try:
+            # Get all passengers for this voyageur
+            voyageur_passengers = auth_client.get_passengers_by_voyageur(obj.voyageur)
+            passenger_map = {p.get('id'): p for p in voyageur_passengers}
+            
+            passenger_names = []
+            for pr in obj.passenger_reservations.all():
+                passenger_data = passenger_map.get(pr.passenger)
+                if passenger_data:
+                    passenger_names.append(f"{passenger_data.get('prenom')} {passenger_data.get('nom')}")
+            
+            return passenger_names
+        except Exception:
+            pass
+        
+        return []
+    
+    def get_flight_origin(self, obj):
+        """Get origin of first flight segment"""
+        first_segment = obj.flight_segments.first()
+        if first_segment:
+            return first_segment.origin
+        return None
+    
+    def get_flight_destination(self, obj):
+        """Get destination of last flight segment"""
+        last_segment = obj.flight_segments.last()
+        if last_segment:
+            return last_segment.destination
+        return None
+    
+    def get_departure_date(self, obj):
+        """Get departure date of first flight segment"""
+        first_segment = obj.flight_segments.first()
+        if first_segment:
+            return first_segment.departure_date
+        return None
 
-# Add to serializers.py
 
 class PassengerDetailSerializer(serializers.Serializer):
     """Serializer for detailed passenger information"""
@@ -207,10 +300,6 @@ class PassengerDetailSerializer(serializers.Serializer):
     date_exp_passport = serializers.DateField(required=False, allow_null=True)
     email = serializers.EmailField(required=False, allow_blank=True)
     telephone = serializers.CharField(required=False, allow_blank=True)
-    
-    class Meta:
-        fields = ['id', 'nom', 'prenom', 'date_naissance', 'sexe', 
-                  'num_passport', 'date_exp_passport', 'email', 'telephone']
 
 
 class FlightSegmentDetailSerializer(serializers.ModelSerializer):
@@ -248,15 +337,12 @@ class FlightSegmentDetailSerializer(serializers.ModelSerializer):
         return "N/A"
 
 
-# serializers.py - Update the ReservationDetailSerializer
-
-# serializers.py - Update the ReservationDetailSerializer (remove cache)
-
 class ReservationDetailSerializer(serializers.ModelSerializer):
     """Detailed reservation serializer with passengers and flight details"""
     flight_segments = FlightSegmentDetailSerializer(many=True, read_only=True)
     passengers = serializers.SerializerMethodField()
     payment = PaymentSerializer(read_only=True)
+    price_confirmations = PriceConfirmationSerializer(many=True, read_only=True)
     total_passengers = serializers.SerializerMethodField()
     can_cancel = serializers.SerializerMethodField()
     can_modify = serializers.SerializerMethodField()
@@ -264,11 +350,31 @@ class ReservationDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Reservation
         fields = [
-            'id', 'reservation_number', 'created_at', 'updated_at',
-            'status', 'trip_type', 'total_price', 'currency',
-            'amadeus_pnr', 'confirmation_date', 'expiry_date',
-            'flight_segments', 'passengers', 'payment',
-            'total_passengers', 'can_cancel', 'can_modify'
+            'id', 
+            'reservation_number', 
+            'created_at', 
+            'updated_at',
+            'voyageur',
+            'status', 
+            'trip_type', 
+            'search_params',
+            'original_offer',
+            'confirmed_offer',
+            'amadeus_pnr', 
+            'amadeus_booking_data',
+            'last_confirmed_price',
+            'price_confirmed_at',
+            'total_price', 
+            'currency', 
+            'expiry_date', 
+            'confirmation_date',
+            'flight_segments', 
+            'passengers', 
+            'payment',
+            'price_confirmations',
+            'total_passengers', 
+            'can_cancel', 
+            'can_modify'
         ]
     
     def get_passengers(self, obj):
@@ -290,7 +396,7 @@ class ReservationDetailSerializer(serializers.ModelSerializer):
         # Create a map for quick lookup
         passenger_map = {p.get('id'): p for p in voyageur_passengers}
         
-        # Build response with reservation-specific info
+        # Build response with reservation-specific info from PassengerReservation model
         passengers = []
         for pr in obj.passenger_reservations.all():
             passenger_data = passenger_map.get(pr.passenger)
@@ -305,6 +411,7 @@ class ReservationDetailSerializer(serializers.ModelSerializer):
                     'date_exp_passport': passenger_data.get('date_exp_passport'),
                     'email': passenger_data.get('email'),
                     'telephone': passenger_data.get('telephone'),
+                    # Fields from PassengerReservation model
                     'seat_number': pr.seat_number,
                     'check_in_status': pr.check_in_status,
                     'baggage_quantity': pr.baggage_quantity,
@@ -319,9 +426,9 @@ class ReservationDetailSerializer(serializers.ModelSerializer):
         return obj.passenger_reservations.count()
     
     def get_can_cancel(self, obj):
-        """Check if reservation can be cancelled"""
-        return obj.status == 'CONFIRMED' and obj.confirmation_date
+        """Check if reservation can be cancelled (only confirmed reservations can be cancelled)"""
+        return obj.status == 'CONFIRMED'
     
     def get_can_modify(self, obj):
-        """Check if reservation can be modified"""
+        """Check if reservation can be modified (only pending price or price confirmed can be modified)"""
         return obj.status in ['PENDING_PRICE', 'PRICE_CONFIRMED']

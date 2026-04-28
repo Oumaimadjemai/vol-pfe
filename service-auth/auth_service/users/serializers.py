@@ -258,6 +258,7 @@ class VoyageurSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     username = serializers.CharField(source='user.username', read_only=True)
     user_status = serializers.SerializerMethodField()
+    passport_image = serializers.ImageField(read_only=True)
     
     class Meta:
         model = Voyageur
@@ -265,7 +266,7 @@ class VoyageurSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'username', 'user_status',
             'nom', 'prenom', 'date_naissance', 'sexe', 'telephone',
-            'pays', 'wilaya', 'commune', 'num_passport', 'date_exp_passport',
+            'pays', 'wilaya', 'commune', 'num_passport', 'date_exp_passport','passport_image','passport_verified','passport_verified_at'
         ]
     
     def get_user_status(self, obj):
@@ -421,3 +422,149 @@ class BlockUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ["is_blocked"]
+
+
+# serializers.py (add at bottom)
+from django.utils import timezone
+from .passport_service import _parse_mrz_date, extract_mrz_data, validate_mrz_against_person
+
+
+class PassportUploadSerializer(serializers.Serializer):
+    """
+    Works for both Voyageur and Passenger.
+    Pass the Personne subclass instance as the object to update.
+    """
+    passport_image = serializers.ImageField()
+
+    def update(self, instance, validated_data):
+        # 1. Save image to Cloudinary
+        instance.passport_image = validated_data['passport_image']
+        instance.passport_verified = False          # reset until re-validated
+        instance.passport_verified_at = None
+        instance.save()
+
+        # 2. Extract MRZ from the now-stored Cloudinary URL
+        image_url = instance.passport_image.url
+        mrz_data = extract_mrz_data(image_url)
+
+        if mrz_data is None:
+            raise serializers.ValidationError({
+                'passport_image': (
+                    "Impossible de lire le MRZ. "
+                    "Vérifiez que l'image est nette et que le bas du passeport est visible."
+                )
+            })
+
+        # 3. Validate extracted data against model fields
+        is_valid, errors = validate_mrz_against_person(instance, mrz_data)
+
+        if not is_valid:
+            raise serializers.ValidationError({'mrz_validation': errors})
+
+        # 4. Mark as verified + sync any auto-filled fields (e.g. date_exp_passport)
+        instance.passport_verified = True
+        instance.passport_verified_at = timezone.now()
+        instance.save()
+
+        return instance
+    
+
+# Add to serializers.py
+
+class VoyageurPassportSerializer(serializers.Serializer):
+    """Serializer for voyageur passport upload with MRZ validation"""
+    passport_image = serializers.ImageField()
+    
+    def update(self, instance, validated_data):
+        # Save image to Cloudinary
+        instance.passport_image = validated_data['passport_image']
+        instance.passport_verified = False
+        instance.passport_verified_at = None
+        instance.save()
+        
+        # Extract MRZ from the stored Cloudinary URL
+        image_url = instance.passport_image.url
+        print(f"[Passport] Processing image URL: {image_url}")
+        
+        mrz_data = extract_mrz_data(image_url)
+        
+        if mrz_data is None:
+            raise serializers.ValidationError({
+                'passport_image': (
+                    "Impossible de lire le MRZ. Vérifiez que l'image est nette "
+                    "et que le bas du passeport est visible. Assurez-vous que "
+                    "la photo est bien cadrée sur la zone MRZ (en bas du passeport)."
+                )
+            })
+        
+        # Validate against person data
+        is_valid, errors = validate_mrz_against_person(instance, mrz_data)
+        
+        if not is_valid:
+            raise serializers.ValidationError({'mrz_validation': errors})
+        
+        # Mark as verified
+        instance.passport_verified = True
+        instance.passport_verified_at = timezone.now()
+        instance.save()
+        
+        return instance
+
+
+class PassengerPassportSerializer(serializers.Serializer):
+    """Serializer for passenger passport upload with MRZ validation"""
+    passport_image = serializers.ImageField()
+    
+    def update(self, instance, validated_data):
+        # Save image to Cloudinary
+        instance.passport_image = validated_data['passport_image']
+        instance.passport_verified = False
+        instance.passport_verified_at = None
+        instance.save()
+        
+        # Extract MRZ
+        image_url = instance.passport_image.url
+        print(f"[Passport] Processing passenger image URL: {image_url}")
+        
+        mrz_data = extract_mrz_data(image_url)
+        
+        if mrz_data is None:
+            raise serializers.ValidationError({
+                'passport_image': (
+                    "Impossible de lire le MRZ. Vérifiez que l'image est nette "
+                    "et que le bas du passeport est visible."
+                )
+            })
+        
+        # Auto-fill fields from MRZ if they're empty
+        if not instance.num_passport and mrz_data.get('number'):
+            instance.num_passport = mrz_data.get('number')
+        
+        if not instance.date_naissance and mrz_data.get('date_of_birth'):
+            dob = _parse_mrz_date(mrz_data['date_of_birth'])
+            if dob:
+                instance.date_naissance = dob
+        
+        if not instance.date_exp_passport and mrz_data.get('expiry_date'):
+            expiry = _parse_mrz_date(mrz_data['expiry_date'])
+            if expiry:
+                instance.date_exp_passport = expiry
+        
+        if not instance.nom and mrz_data.get('surname'):
+            instance.nom = mrz_data.get('surname')
+        
+        if not instance.prenom and mrz_data.get('name'):
+            instance.prenom = mrz_data.get('name')
+        
+        # Validate
+        is_valid, errors = validate_mrz_against_person(instance, mrz_data)
+        
+        if not is_valid:
+            raise serializers.ValidationError({'mrz_validation': errors})
+        
+        # Mark as verified
+        instance.passport_verified = True
+        instance.passport_verified_at = timezone.now()
+        instance.save()
+        
+        return instance

@@ -3,7 +3,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from datetime import date
 from django.utils import timezone
-
+from cloudinary.models import CloudinaryField
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, role='voyageur', **extra_fields):
         if not email:
@@ -96,6 +96,9 @@ class Personne(models.Model):
     sexe = models.CharField(max_length=20, choices=SEXE_CHOICES)
     num_passport = models.CharField(max_length=20,null=True,blank=True)
     date_exp_passport = models.DateField(null=True,blank=True)
+    passport_image = CloudinaryField('passport_image',null=True,blank=True)
+    passport_verified = models.BooleanField(default=False)
+    passport_verified_at = models.DateTimeField(null=True, blank=True)
     class Meta:
         abstract = True
 

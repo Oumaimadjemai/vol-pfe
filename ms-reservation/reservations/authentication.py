@@ -77,42 +77,28 @@ class AuthServiceJWTAuthentication(authentication.BaseAuthentication):
         return (user, token)
     
     def _validate_token(self, token: str) -> Optional[Dict]:
-        """
-        Call auth service /me endpoint to validate token
-        """
-        # Try different possible endpoints
-        endpoints = [
-            f"{self.auth_service_url}/auth/me/",
-        ]
-        
-        for endpoint in endpoints:
-            try:
-                logger.info(f"Trying endpoint: {endpoint}")
-                response = requests.get(
-                    endpoint,
-                    headers={'Authorization': f'Bearer {token}'},
-                    timeout=self.timeout
-                )
-                
-                if response.status_code == 200:
-                    user_data = response.json()
-                    logger.info(f"Token validated successfully at {endpoint}")
-                    return user_data
-                else:
-                    logger.debug(f"Endpoint {endpoint} returned {response.status_code}")
-                    
-            except requests.ConnectionError:
-                logger.debug(f"Cannot connect to {endpoint}")
-                continue
-            except requests.Timeout:
-                logger.debug(f"Timeout connecting to {endpoint}")
-                continue
-            except Exception as e:
-                logger.debug(f"Error with {endpoint}: {e}")
-                continue
-        
-        logger.error("All auth service endpoints failed")
-        return None
-    
+        endpoint = f"{self.auth_service_url}/auth/me/"
+        try:
+            logger.info(f"Validating token at: {endpoint}")
+            response = requests.get(
+                endpoint,
+                headers={'Authorization': f'Bearer {token}'},
+                timeout=self.timeout
+            )
+            if response.status_code == 200:
+                logger.info("Token validated successfully")
+                return response.json()
+            logger.error(f"Token validation failed: HTTP {response.status_code} from {endpoint}")
+            return None
+        except requests.ConnectionError:
+            logger.error(f"Cannot connect to auth service at {endpoint} — is AUTH_SERVICE_URL set correctly?")
+            return None
+        except requests.Timeout:
+            logger.error(f"Timeout connecting to auth service at {endpoint}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error validating token: {e}")
+            return None 
+           
     def authenticate_header(self, request):
         return 'Bearer'

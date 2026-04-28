@@ -1,33 +1,54 @@
+import sys
+import os
 from django.apps import AppConfig
-import logging
 
-logger = logging.getLogger(__name__)
+# Management commands that must never start background threads
+_SKIP_COMMANDS = {
+    'migrate', 'makemigrations', 'collectstatic',
+    'shell', 'test', 'createsuperuser', 'dbshell',
+    'showmigrations', 'sqlmigrate', 'check',
+}
 
 
-class ReservationConfig(AppConfig):
+class ReservationsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'reservations'  # Replace with your app name
+    name = 'reservations'
 
     def ready(self):
-        """Start Eureka client when Django app is ready"""
-        # Import here to avoid circular imports
-        from . import eureka_client
-        
-        # Only start in production-like environments
-        import os
-        import sys
-        
-        # Skip during migrations and tests
-        if 'migrate' in sys.argv or 'makemigrations' in sys.argv:
-            logger.info("Skipping Eureka client start during migrations")
+        # Skip background threads for management commands
+        if any(cmd in sys.argv for cmd in _SKIP_COMMANDS):
             return
-        
-        if 'test' in sys.argv:
-            logger.info("Skipping Eureka client start during tests")
+
+        # On Django's dev server, ready() is called twice (once by the
+        # reloader parent, once by the worker child). Only run in the
+        # worker child — RUN_MAIN is set by the reloader on the child.
+        # For Gunicorn/uWSGI, RUN_MAIN is not set at all, so we always run.
+        is_dev_server = 'runserver' in sys.argv
+        if is_dev_server and os.getenv('RUN_MAIN') != 'true':
             return
-        
-        # Start Eureka client
+
+        self._start_kafka()
+        self._start_eureka()
+
+    # ------------------------------------------------------------------ #
+
+    def _start_kafka(self):
+        if os.getenv('KAFKA_ENABLED', 'True').lower() != 'true':
+            print("⚠️ Kafka disabled via KAFKA_ENABLED=False")
+            return
         try:
-            eureka_client.start_eureka_client()
+            from .kafka_consumer import start_reservation_consumer
+            start_reservation_consumer()
+            print("✅ Reservation service Kafka consumer started")
         except Exception as e:
-            logger.error(f"Failed to start Eureka client: {e}")
+            print(f"⚠️ Failed to start Kafka consumer: {e}")
+
+    def _start_eureka(self):
+        if os.getenv('DISABLE_EUREKA', 'False').lower() == 'true':
+            print("⚠️ Eureka disabled via DISABLE_EUREKA=True")
+            return
+        try:
+            from .eureka_client import start_eureka_client
+            start_eureka_client()
+        except Exception as e:
+            print(f"⚠️ Failed to start Eureka client: {e}")
