@@ -6,7 +6,9 @@ class UsersConfig(AppConfig):
     name = 'users'
 
     def ready(self):
+        import users.signals
         # Import from project root (auth_service)
         print("Starting Eureka client...")
         from auth_service.eureka_client import start_eureka_client
         start_eureka_client()
+

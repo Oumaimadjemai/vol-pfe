@@ -1,0 +1,57 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    web-application-type: reactive
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost:3000"
+              - "https://vol-cyan.vercel.app"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+            maxAge: 3600
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        - id: auth-service-route
+          uri: lb://AUTH-SERVICE
+          predicates:
+            - Path=/auth-service/**
+          filters:
+            - StripPrefix=1
+        - id: service-vols-route
+          uri: lb://SERVICE-VOLS
+          predicates:
+            - Path=/service-vols/**
+          filters:
+            - StripPrefix=1
+        - id: ms-reservation-route
+          uri: lb://MS-RESERVATION
+          predicates:
+            - Path=/ms-reservation/**
+          filters:
+            - StripPrefix=1
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8888/eureka/
+    fetch-registry: true
+    register-with-eureka: true
