@@ -37,7 +37,7 @@ spring:
           filters:
             - StripPrefix=1
         - id: service-vols-route
-          uri: lb://SERVICE-VOLS
+          uri: lb://service-vols
           predicates:
             - Path=/service-vols/**
           filters:
@@ -52,6 +52,6 @@ spring:
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8888/eureka/
+      defaultZone: http://registry:8888/eureka/
     fetch-registry: true
     register-with-eureka: true

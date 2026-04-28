@@ -4,5 +4,6 @@
     <file url="file://$PROJECT_DIR$/Gateway/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/Registery/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/gatway/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/kafka-orchestrator/src/main/java" charset="UTF-8" />
   </component>
 </project>

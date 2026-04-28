@@ -10,7 +10,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .serializers import RegisterVoyageurSerializer
-
+from kafka_utils import kafka
+from django.utils import timezone
 
 class RegisterVoyageurView(APIView):
     permission_classes = []
@@ -18,7 +19,36 @@ class RegisterVoyageurView(APIView):
     def post(self, request):
         serializer = RegisterVoyageurSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        user = serializer.save()
+        from .models import Voyageur
+        voyageur=Voyageur.objects.get(user=user)
+        kafka.send_event(
+            topic='user-events',
+            event_type='USER_REGISTERED',
+            payload={
+                'user_id': user.id,
+                'email': user.email,
+                'role': user.role,
+                'username': user.username,
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
+        )
+        kafka.send_event(
+            topic='voyageur-events',
+            event_type='VOYAGEUR_REGISTERED',
+            payload={
+                'voyageur_id': voyageur.id,
+                'user_id': user.id,
+                'nom':voyageur.nom,
+                'prenom':voyageur.prenom,
+                'email': user.email,
+                'telephone': voyageur.telephone,
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
+        )
+
         return Response({"message": "Compte créé"}, status=status.HTTP_201_CREATED)
     
 
@@ -110,6 +140,23 @@ class VoyageurUpdateView(generics.UpdateAPIView):
     """
     serializer_class = VoyageurSerializer
     permission_classes = [IsAuthenticated]
+
+    def perform_update(self, serializer):
+        Voyageur = serializer.save()
+        kafka.send_event(
+            topic='voyageur-events',
+            event_type='VOYAGEUR_UPDATED',
+            payload={
+                'voyageur_id': Voyageur.id,
+                'user_id': Voyageur.user.id,
+                'nom':Voyageur.nom,
+                'prenom':Voyageur.prenom,
+                'email': Voyageur.user.email,
+                'telephone': Voyageur.telephone,
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
+        )
     
     def get_queryset(self):
         user = self.request.user
@@ -152,6 +199,21 @@ from .permissions import IsVoyageur
 class PassengerCreateView(generics.CreateAPIView):
     serializer_class = PassengerSerializer
     permission_classes = [IsAuthenticated]
+    def perform_create(self, serializer):
+        passenger = serializer.save()
+        kafka.send_event(
+            topic='passenger-events',
+            event_type='PASSENGER_CREATED',
+            payload={
+                'passenger_id': passenger.id,
+                'voyageur_id': passenger.voyageur.id,
+                'nom': passenger.nom,
+                'prenom': passenger.prenom,
+                'date_naissance': passenger.date_naissance.isoformat(),
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
+        )   
 
 class PassengerListView(generics.ListAPIView):
     serializer_class = PassengerSerializer
@@ -162,14 +224,35 @@ class PassengerListView(generics.ListAPIView):
             voyageur=self.request.user.voyageur
         )
 
-class PassengerDetailView(generics.RetrieveAPIView):
+# users/views.py
+
+class PassengerDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Passenger.objects.all()
     serializer_class = PassengerSerializer
     permission_classes = [IsAuthenticated]
-
+    
     def get_queryset(self):
-        return Passenger.objects.filter(
-            voyageur=self.request.user.voyageur
-        )
+        user = self.request.user
+        
+        # Vérifier si l'utilisateur est admin
+        is_admin = False
+        if hasattr(user, 'is_staff') and user.is_staff:
+            is_admin = True
+        elif hasattr(user, 'is_superuser') and user.is_superuser:
+            is_admin = True
+        elif hasattr(user, 'role') and user.role == 'admin':
+            is_admin = True
+        
+        # Les admins voient tous les passagers
+        if is_admin:
+            return Passenger.objects.all()
+        
+        # Les utilisateurs normaux voient seulement leurs passagers
+        if hasattr(user, 'voyageur') and user.voyageur:
+            return Passenger.objects.filter(voyageur=user.voyageur)
+        
+        # Si l'utilisateur n'a pas de voyageur, retourner vide
+        return Passenger.objects.none()
 class PassengerUpdateView(generics.UpdateAPIView):
     serializer_class = PassengerSerializer
     permission_classes = [IsAuthenticated]
@@ -177,6 +260,21 @@ class PassengerUpdateView(generics.UpdateAPIView):
     def get_queryset(self):
         return Passenger.objects.filter(
             voyageur=self.request.user.voyageur
+        )
+    def perform_update(self, serializer):
+        passenger = serializer.save()
+        kafka.send_event(
+            topic='passenger-events',
+            event_type='PASSENGER_UPDATED',
+            payload={
+                'passenger_id': passenger.id,
+                'voyageur_id': passenger.voyageur.id,
+                'nom': passenger.nom,
+                'prenom': passenger.prenom,
+                'date_naissance': passenger.date_naissance.isoformat(),
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
         )
 
 class PassengerDeleteView(generics.DestroyAPIView):
@@ -186,6 +284,20 @@ class PassengerDeleteView(generics.DestroyAPIView):
     def get_queryset(self):
         return Passenger.objects.filter(
             voyageur=self.request.user.voyageur
+        )
+    def perform_destroy(self, instance):
+        passenger_id = instance.id
+        voyageur_id = instance.voyageur.id
+        instance.delete()
+        kafka.send_event(
+            topic='passenger-events',
+            event_type='PASSENGER_DELETED',
+            payload={
+                'passenger_id': passenger_id,
+                'voyageur_id': voyageur_id,
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
         )
 
 from rest_framework import generics
@@ -228,6 +340,23 @@ from .serializers import AdminCreateUserSerializer, UserSerializer, UserUpdateSe
 class UserCreateView(generics.CreateAPIView):
     serializer_class = AdminCreateUserSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
+    def perform_create(self, serializer):
+        user = serializer.save()
+        kafka.send_event(
+            topic='user-events',
+            event_type='USER_CREATED',
+            payload={
+                'user_id': user.id,
+                'email': user.email,
+                'role': user.role,
+                'username': user.username,
+                'is_active': user.is_active,
+                'is_blocked': user.is_blocked,
+                'status': user.status,
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
+        )
 
 class UserListView(generics.ListAPIView):
     queryset = User.objects.all().order_by('-date_joined')
@@ -243,11 +372,43 @@ class UserUpdateView(generics.UpdateAPIView):
     queryset = User.objects.all()
     serializer_class = UserUpdateSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
+    def perform_update(self, serializer):
+        user = serializer.save()
+        kafka.send_event(
+            topic='user-events',
+            event_type='USER_UPDATED',
+            payload={
+                'user_id': user.id,
+                'email': user.email,
+                'role': user.role,
+                'username': user.username,
+                'is_active': user.is_active,
+                'is_blocked': user.is_blocked,
+                'status': user.status,
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
+        )
+
 
 class UserDeleteView(generics.DestroyAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated, IsAdminOrAgent]
+    def perform_destroy(self, instance):
+        user_id = instance.id
+        instance.delete()
+        kafka.send_event(
+            topic='user-events',
+            event_type='USER_DELETED',
+            payload={
+                'user_id': user_id,
+                'email': instance.email,
+                'role': instance.role,
+                'timestamp': timezone.now().isoformat()
+            },
+            source_service='auth-service'
+        )
 
 # Ajout d'une vue pour mettre à jour les features d'un agent
 class UserFeaturesUpdateView(generics.UpdateAPIView):
@@ -278,10 +439,20 @@ class PasswordResetRequestView(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()  # This will now send email via SMTP
+        kafka.send_event(
+            topic='user-events',
+            event_type='PASSWORD_RESET_REQUESTED',
+            payload={
+                'email': serializer.validated_data['email'],
+                'timestamp': timezone.now().isoformat() 
+            },
+            source_service='auth-service'   
+        )
         return Response(
             {"message": "Email de réinitialisation envoyé"},
             status=status.HTTP_200_OK
         )
+    
 class PasswordResetConfirmView(generics.GenericAPIView):
     """Step 2: Confirm password reset with token"""
     serializer_class = PasswordResetConfirmSerializer
@@ -291,6 +462,15 @@ class PasswordResetConfirmView(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        kafka.send_event(
+            topic='user-events',
+            event_type='PASSWORD_RESET_CONFIRMED',
+            payload={
+                'email': serializer.validated_data['email'],
+                'timestamp': timezone.now().isoformat() ,
+            },
+            source_service='auth-service'   
+        )
         return Response(
             {"message": "Mot de passe réinitialisé avec succès"},
             status=status.HTTP_200_OK
@@ -432,3 +612,72 @@ class MeView(APIView):
             data['voyageur'] = VoyageurSerializer(user.voyageur).data
         
         return Response(data)   
+
+
+# views.py (add these two views)
+from .serializers import PassportUploadSerializer
+
+
+class VoyageurPassportUploadView(generics.UpdateAPIView):
+    """
+    POST /voyageurs/{id}/passport/
+    Voyageur uploads their own passport image → MRZ extracted & validated.
+    """
+    serializer_class = PassportUploadSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ['patch', 'put']
+
+    def get_object(self):
+        user = self.request.user
+        # Voyageur can only upload for themselves; admin can upload for anyone
+        if user.role in ['admin', 'agent']:
+            return generics.get_object_or_404(Voyageur, pk=self.kwargs['pk'])
+        return generics.get_object_or_404(
+            Voyageur, pk=self.kwargs['pk'], user=user
+        )
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.update(instance, serializer.validated_data)
+        return Response(
+            {
+                'message': 'Passport vérifié avec succès.',
+                'passport_verified': instance.passport_verified,
+                'passport_verified_at': instance.passport_verified_at,
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class PassengerPassportUploadView(generics.UpdateAPIView):
+    """
+    PATCH /passengers/{id}/passport/
+    Upload & validate a passport for a specific Passenger.
+    """
+    serializer_class = PassportUploadSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ['patch', 'put']
+
+    def get_object(self):
+        user = self.request.user
+        if user.role in ['admin', 'agent']:
+            return generics.get_object_or_404(Passenger, pk=self.kwargs['pk'])
+        return generics.get_object_or_404(
+            Passenger, pk=self.kwargs['pk'], voyageur=user.voyageur
+        )
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.update(instance, serializer.validated_data)
+        return Response(
+            {
+                'message': 'Passport passager vérifié avec succès.',
+                'passport_verified': instance.passport_verified,
+                'passport_verified_at': instance.passport_verified_at,
+            },
+            status=status.HTTP_200_OK
+        )
