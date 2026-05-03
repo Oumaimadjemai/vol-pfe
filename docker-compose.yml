@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   # ============ INFRASTRUCTURE ============
@@ -225,8 +225,80 @@ services:
       timeout: 10s
       retries: 3
 
+  
+# Service de paiment (Node.js) - Port 3003
+  ms-paiement:
+    build:
+      context: ./ms-paiement
+      dockerfile: Dockerfile
+    container_name: ms-paiement
+    ports:
+      - "3003:3003"
+    networks:
+      - app-network
+    depends_on:
+      - registry
+      - mongodb 
+    environment:
+      - NODE_ENV=docker
+      - PORT=3003
+      - EUREKA_HOST=ms-paiement          # ✅ matches process.env.EUREKA_HOST
+      - EUREKA_IP=ms-paiement            # ✅ matches process.env.EUREKA_IP
+      - EUREKA_SERVER_HOST=registry      # ✅ matches process.env.EUREKA_SERVER_HOST
+      - EUREKA_SERVER_PORT=8888 
+      - CHARGILY_API_KEY=${CHARGILY_API_KEY}
+      - CHARGILY_SECRET_KEY=${CHARGILY_SECRET_KEY}
+      - CHARGILY_API_URL=${CHARGILY_API_URL:-https://api.chargily.com/v2}
+      - CHARGILY_WEBHOOK_SECRET=${CHARGILY_WEBHOOK_SECRET}
+      - RESERVATION_SERVICE_URL=http://ms-reservation:8001
+      - MONGO_URI=mongodb://admin:password@mongodb:27017/ms_paiement?authSource=admin
+      - WEBHOOK_BASE_URL=https://relish-underling-lumpish.ngrok-free.dev
+    env_file:
+      - ./ms-paiement/.env
+    #healthcheck:
+      #test: ["CMD", "curl", "-f", "http://localhost:3003/api/payments/health"]
+      #interval: 30s
+      #timeout: 10s
+      #retries: 3
+
+  # MongoDB pour le service de paiement
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - app-network
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  # ============ NGROK ============
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    ports:
+      - "4040:4040"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http ms-paiement:3003 --log=stdout
+    networks:
+      - app-network
+    depends_on:
+      - ms-paiement
+    restart: unless-stopped
+
+
 volumes:
   postgres_data:
+  mongodb_data:   
+
 
 networks:
   app-network:

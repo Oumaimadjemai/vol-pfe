@@ -9,17 +9,14 @@ class AmadeusService {
         this.accessToken = null;
         this.tokenExpiry = null;
     }
-
-   
-    // TOKEN
-   
+    // ============== TOKEN =============================
     async getAccessToken() {
         if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
             return this.accessToken;
         }
 
         try {
-            console.log(' Obtention du token Amadeus...');
+            console.log('Obtention du token Amadeus...');
             
             const response = await axios.post(
                 `${this.baseURL}/v1/security/oauth2/token`,
@@ -40,10 +37,7 @@ class AmadeusService {
             throw new Error('Impossible d\'obtenir le token Amadeus');
         }
     }
-
-
-    // RECHERCHE DE VOLS
-   
+    // ===================  RECHERCHE DE VOLS ========================
     async searchFlights(params) {
         try {
             const token = await this.getAccessToken();
@@ -55,6 +49,9 @@ class AmadeusService {
                 refundable = false, baggage = false,
                 currency = 'DZD', maxResults =  10
             } = params;
+
+            const totalPassengers = adults + children + infants;
+            console.log(` Recherche pour ${totalPassengers} passagers`);
 
             let url = `${this.baseURL}/v2/shopping/flight-offers`;
             url += `?originLocationCode=${origin}`;
@@ -69,7 +66,7 @@ class AmadeusService {
             url += `&currencyCode=${currency}`;
             url += `&max=${maxResults}`;
 
-            console.log('📡 URL Amadeus:', url);
+            console.log(' URL Amadeus:', url);
 
             const response = await axios.get(url, {
                 headers: { 
@@ -81,8 +78,17 @@ class AmadeusService {
             console.log(` ${response.data.data?.length || 0} offres trouvées`);
 
             let flights = this.transformFlightData(response.data);
-
-            // Filtrage
+            
+            // Filtrage par places dispo
+            console.log(` Filtrage des vols par places disponibles`);
+            const avant = flights.length;
+            flights = flights.filter(flight => {
+                const places = flight.seatsAvailable || 0;
+                return places >= totalPassengers; 
+            });
+            const apres = flights.length;
+           // console.log(` Filtrage places: ${avant} → ${apres} vols (${avant - apres} vols supprimés - pas assez de places pour ${totalPassengers} passagers)`);
+            // Autres filtrages
             if (baggage) {
                 flights = flights.filter(f => f.baggage.quantity > 0);
             }
@@ -97,7 +103,7 @@ class AmadeusService {
                 success: true,
                 count: flights.length,
                 tripType: returnDate ? 'ALLER_RETOUR' : 'ALLER_SIMPLE',
-                searchParams: params,
+                searchParams: { ...params, totalPassengers },
                 flights: flights
             };
 
@@ -110,126 +116,183 @@ class AmadeusService {
             };
         }
     }
-
-   
-    // 3. GÉNÉRER LES COMBINAISONS 
-  
-generateCombinations(segments) {
+// ==================    RECHERCHE MULTI-DESTINATION   =========================
+async searchMultiDestination(requestData) {
     try {
-        console.log(' Génération des combinaisons...');
-        console.log(' Segments reçus:', JSON.stringify(segments, null, 2).substring(0, 500) + '...');
+        console.log(' Recherche multi-destination');
+        console.log(' Données reçues:', JSON.stringify(requestData, null, 2));
         
-        if (!segments || segments.length === 0) {
-            console.log(' Aucun segment à combiner');
-            return [];
-        }
+        // Extraire les données de l'objet requestData
+        const { flights, adults, children, infants, travelClass, nonStop, refundable, baggage, currency } = requestData;//flights : Tableau des segments de vol (ex: CDG→JFK, puis JFK→LHR)
+        const totalPassengers = (adults || 1) + (children || 0) + (infants || 0);
+        console.log(` Total passagers: ${totalPassengers}`);
 
-        // Vérifier la structure
-        for (let i = 0; i < segments.length; i++) {
-            const segment = segments[i];
-            console.log(` Segment ${i+1}:`, {
-                hasData: !!segment.data,
-                hasFlights: !!(segment.data && segment.data.flights),
-                flightCount: segment.data?.flights?.length || 0
-            });
-            
-            if (!segment.data || !segment.data.flights || segment.data.flights.length === 0) {
-                console.log(` Segment ${i+1} n'a pas de vols`);
-                return [];
-            }
-        }
-
-        // Démarrer avec le premier segment
-        let combinations = segments[0].data.flights.map(flight => ({
-            flights: [flight],
-            totalPrice: flight.price.total,
-            segments: [flight]
-        }));
-
-        console.log(` Départ avec ${combinations.length} combinaisons`);
-
-        // Pour chaque segment suivant
-        for (let i = 1; i < segments.length; i++) {
-            const newCombinations = [];
-            const currentFlights = segments[i].data.flights;
-
-            for (let j = 0; j < combinations.length; j++) {
-                const combo = combinations[j];
-                for (let k = 0; k < currentFlights.length; k++) {
-                    const flight = currentFlights[k];
-                    newCombinations.push({
-                        flights: [...combo.flights, flight],
-                        totalPrice: combo.totalPrice + flight.price.total,
-                        segments: [...combo.segments, flight]
-                    });
-                }
-            }
-            combinations = newCombinations;
-            console.log(` Après segment ${i+1}: ${combinations.length} combinaisons`);
-        }
-
-        return combinations;
-
-    } catch (error) {
-        console.error(' Erreur generateCombinations:', error);
-        return [];
-    }
-}
-
-   
-    //  RECHERCHE MULTI-DESTINATION 
-// ===========================================
-
-async searchMultiDestination(flights, passengers, travelClass, filters = {}) {
-    try {
-        console.log('🔍 Recherche multi-destination en parallèle...');
-        
-        // Lancer toutes les recherches en même temps
+        // Créer l'objet passengers pour la compatibilité
+        const passengers = {
+            adults: adults || 1,
+            children: children || 0,
+            infants: infants || 0
+        };
+        // Créer l'objet filters
+        const filters = {
+            nonStop: nonStop || false,
+            refundable: refundable || false,
+            baggage: baggage || false,
+            currency: currency || 'DZD'
+        };
+        // Lancer recherches en même temps
         const searchPromises = flights.map(async (flight, index) => {
-            console.log(` Segment ${index+1}: ${flight.origin} → ${flight.destination} le ${flight.departureDate}`);
+            console.log(` Segment ${index+1}: ${flight.from || flight.origin} → ${flight.to || flight.destination} le ${flight.date || flight.departureDate}`);
             
             const result = await this.searchFlights({
-                origin: flight.origin,
-                destination: flight.destination,
-                departureDate: flight.departureDate,
+                origin: flight.from || flight.origin,
+                destination: flight.to || flight.destination,
+                departureDate: flight.date || flight.departureDate,
                 adults: passengers.adults,
-                children: passengers.children || 0,
-                infants: passengers.infants || 0,
+                children: passengers.children,
+                infants: passengers.infants,
                 travelClass: travelClass,
-                nonStop: filters.nonStop || false,
-                refundable: filters.refundable || false,
-                baggage: filters.baggage || false,
-                currency: filters.currency || 'DZD'
+                nonStop: filters.nonStop,
+                refundable: filters.refundable,
+                baggage: filters.baggage,
+                currency: filters.currency
             });
             
             return {
                 segment: index + 1,
-                origin: flight.origin,
-                destination: flight.destination,
-                departureDate: flight.departureDate,
+                origin: flight.from || flight.origin,
+                destination: flight.to || flight.destination,
+                departureDate: flight.date || flight.departureDate,
                 data: result
             };
         });
-        
-        // Attendre que TOUTES les recherches  terminées
-        const results = await Promise.all(searchPromises);
-        
-        console.log(` ${results.length} segments recherchés en parallèle`);
-        
+        const results = await Promise.all(searchPromises);//exécution parallèle des recherches pour chaque segment
+        console.log(` ${results.length} segments recherchés`);
+
+        // Filtrer nombre de places
+        results.forEach(segment => {
+            if (segment.data?.flights) {
+                const avant = segment.data.flights.length;
+                segment.data.flights = segment.data.flights.filter(
+                    flight => (flight.seatsAvailable || 0) >= totalPassengers
+                );
+                const apres = segment.data.flights.length;
+                if (avant !== apres) {
+                    console.log(`Segment ${segment.segment}: ${avant} → ${apres} vols filtrés`);
+                }
+            }
+        });
+        // Vérifier disponibilité des vols pour chaque segment
+        const hasFlights = results.every(segment => 
+            segment.data?.flights && segment.data.flights.length > 0
+        );//every verifier segment par segment ida >0
+
+        if (!hasFlights) {
+            console.log(' Aucun vol disponible avec assez de places');
+            return {
+                success: true,
+                tripType: "MULTI_DESTINATION",
+                searchParams: {
+                    flights,
+                    passengers,
+                    totalPassengers,
+                    travelClass,
+                    filters
+                },
+                segments: results,
+                combinations: [],
+                totalCombinations: 0
+            };
+        }
+        // Générer les combinaisons avec le nombre de passagers
+        const combinations = this.generateCombinations(results, totalPassengers);
+        console.log(` ${combinations.length} combinaisons valides générées`);
+
         return {
             success: true,
-            segments: results
+            tripType: "MULTI_DESTINATION",
+            searchParams: {
+                flights,
+                passengers,
+                totalPassengers,
+                travelClass,
+                filters
+            },
+            segments: results,
+            combinations: combinations,
+            totalCombinations: combinations.length
         };
-        
+
     } catch (error) {
         console.error(' Erreur multi-destination:', error);
         throw error;
     }
-}
+}    // ================  GÉNÉRER LES COMBINAISONS  ===========================
+    generateCombinations(segments, totalPassengers) {
+        try {
+            console.log(' Génération des combinaisons...');
+            
+            if (!segments || segments.length === 0) {
+                console.log(' Aucun segment à combiner');
+                return [];
+            }
+            // Filtrer chaque segment par nombre de places
+            const filteredSegments = segments.map(segment => {
+                const filteredFlights = segment.data.flights.filter(flight => 
+                    (flight.seatsAvailable || 0) >= totalPassengers
+                );
+                
+                return {
+                    ...segment,
+                    data: {
+                        ...segment.data,
+                        flights: filteredFlights
+                    }
+                };
+            });
+            // Vérifier qu'il reste des vols
+            for (let i = 0; i < filteredSegments.length; i++) {
+                if (filteredSegments[i].data.flights.length === 0) {
+                    console.log(` Segment ${i+1} n'a plus de vols après filtrage`);
+                    return [];
+                }
+            }
+            // Démarrer avec le premier segment
+            let combinations = filteredSegments[0].data.flights.map(flight => ({
+                flights: [flight],
+                totalPrice: flight.price.total,
+                segments: [flight]
+            }));
+            console.log(`📦 Départ avec ${combinations.length} combinaisons`);
 
-   
-    //  TRANSFORMER LES DONNÉES
-   
+            // Ajouter les segments suivants
+            for (let i = 1; i < filteredSegments.length; i++) {
+                const newCombinations = [];
+                const currentFlights = filteredSegments[i].data.flights;
+
+                for (let j = 0; j < combinations.length; j++) {
+                    const combo = combinations[j];
+                    for (let k = 0; k < currentFlights.length; k++) {
+                        const flight = currentFlights[k];
+                        newCombinations.push({
+                            flights: [...combo.flights, flight],
+                            totalPrice: combo.totalPrice + flight.price.total,
+                            segments: [...combo.segments, flight]
+                        });
+                    }
+                }
+                combinations = newCombinations;
+                console.log(`Après segment ${i+1}: ${combinations.length} combinaisons`);
+            }
+            return combinations;
+
+        } catch (error) {
+            console.error(' Erreur generateCombinations:', error);
+            return [];
+        }
+    }
+    // TRANSFORMER LES DONNÉES
+    // ===========================================
     transformFlightData(amadeusData) {
         try {
             if (!amadeusData.data || !Array.isArray(amadeusData.data)) {
@@ -241,7 +304,6 @@ async searchMultiDestination(flights, passengers, travelClass, filters = {}) {
                     const itinerary = offer.itineraries[0];
                     const segment = itinerary.segments[0];
                     
-                    // Bagages
                     let baggageQuantity = 0;
                     let baggageInfo = "Non inclus";
                     
@@ -255,25 +317,20 @@ async searchMultiDestination(flights, passengers, travelClass, filters = {}) {
                                 baggageInfo += ` (${includedBags.weight} ${includedBags.weightUnit || 'kg'})`;
                             }
                         }
-                    }
-                    
+                    } 
                     // Remboursement
                     let isRefundable = false;
                     const fareBasis = offer.travelerPricings?.[0]?.fareDetailsBySegment?.[0]?.fareBasis || "";
                     const cabin = offer.travelerPricings?.[0]?.fareDetailsBySegment?.[0]?.cabin || "";
-                    
                     isRefundable = fareBasis.includes("FLEX") || 
-                                  fareBasis.includes("FULL") || 
-                                  fareBasis.includes("BUS") || 
-                                  fareBasis.includes("PRM") ||
-                                  fareBasis.includes("REF") ||
-                                  cabin.includes("BUSINESS") ||
-                                  cabin.includes("FIRST");
+                                   fareBasis.includes("FULL") || 
+                                   fareBasis.includes("BUS") || 
+                                   fareBasis.includes("PRM") ||
+                                   fareBasis.includes("REF") ||
+                                   cabin.includes("BUSINESS") ||
+                                   cabin.includes("FIRST");
                     
-                    // Vol direct
                     const isDirect = itinerary.segments.length === 1;
-                    
-                    // Prix
                     const totalPrice = parseFloat(offer.price.total);
                     const pricePerPassenger = totalPrice / (offer.travelerPricings?.length || 1);
                     
@@ -336,10 +393,8 @@ async searchMultiDestination(flights, passengers, travelClass, filters = {}) {
             return [];
         }
     }
-
-   
-    //  FORMATER LA DURÉE
-   
+    // FORMATER LA DURÉE
+    // ===========================================
     formatDuration(duration) {
         if (!duration) return '';
         const matches = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
@@ -352,10 +407,8 @@ async searchMultiDestination(flights, passengers, travelClass, filters = {}) {
         if (minutes > 0) return `${minutes}min`;
         return duration;
     }
-
-   
-    //  VÉRIFIER DISPONIBILITÉ
-   
+    // VÉRIFIER Disponibilite pour Reservation
+    // ===========================================
     async checkAvailability(flightId) {
         try {
             const token = await this.getAccessToken();

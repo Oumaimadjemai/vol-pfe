@@ -1,1 +1,45 @@
+# Create a clean .gitignore file
+@"
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.log
+*.pyc
+
+# Virtual environment
+venv/
+ENV/
+.env/
+.venv/
+
+# Django
+*.pot
+*.pyc
+*.pyo
+*.sqlite3
+db.sqlite3
+media/
+staticfiles/
+static/
+
+# Environment variables - IMPORTANT
 .env
+.env.local
+.env.*.local
+ms-reservation/.env
+ms-destination/.env
+service-vols/.env
+*.env
+
+# VSCode
+.vscode/
+
+# Other
+bfg.jar
+"@ | Out-File -FilePath .gitignore -Encoding UTF8
+
+# Verify the file
+Get-Content .gitignore
