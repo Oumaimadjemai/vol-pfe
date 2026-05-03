@@ -131,6 +131,9 @@ services:
     - "8000:8000"
    networks:
     - app-network
+
+   env_file:
+    - ./service-auth/auth_service/.env
    depends_on:
     postgres:
       condition: service_healthy
@@ -155,10 +158,14 @@ services:
     - DISABLE_EUREKA=False
     - DEBUG=True
     - SECRET_KEY=docker-dev-secret-key
-    - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-test}
-    - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-test}
-    - EMAIL_USER=${EMAIL_USER:-test@example.com}
-    - EMAIL_PASSWORD=${EMAIL_PASSWORD:-test}
+    - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+    - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+    - DEBUG=True
+    - EMAIL_USER=${EMAIL_USER}
+    - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+    - EMAIL_HOST=smtp.gmail.com  # Add this
+    - EMAIL_PORT=587  # Add this
+    - EMAIL_USE_TLS=True  # Add this
     - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
   # Reservation Service (DRF) - Port 8000
   ms-reservation:
@@ -194,6 +201,67 @@ services:
       - SECRET_KEY=docker-dev-secret-key
       - REDIS_URL=redis://redis:6379/1
       - DJANGO_SERVER_RUNNING=True
+
+  ms-destination:
+    build:
+      context: ./ms-destination
+      dockerfile: Dockerfile
+    container_name: ms-destination
+    ports:
+      - "8002:8002"
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      registry:
+        condition: service_started
+      service-auth:
+        condition: service_started
+    environment:
+      # Django Settings
+      - DEBUG=True
+      - SECRET_KEY=docker-dev-secret-key-destination
+      - ALLOWED_HOSTS=localhost,127.0.0.1,ms-destination
+      
+      # Database
+      - DB_NAME=ms_destination_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      
+      # Kafka
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_ENABLED=True
+      
+      # Eureka Configuration
+      - EUREKA_SERVER=http://registry:8888/eureka
+      - EUREKA_APP_NAME=MS-DESTINATION
+      - EUREKA_HOST=ms-destination
+      - EUREKA_INSTANCE_PORT=8002
+      - WAIT_FOR_EUREKA=True
+      - DISABLE_EUREKA=False
+      
+      # Service URLs
+      - AUTH_SERVICE_URL=http://service-auth:8000
+      - AUTH_SERVICE_EUREKA_NAME=AUTH-SERVICE
+      
+      # Redis (if needed)
+      - REDIS_URL=redis://redis:6379/2
+      
+      # Django specific
+      - DJANGO_SERVER_RUNNING=True
+      - RUN_MAIN=true
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/actuator/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Vols/Flights Service (Node.js) - Port 3002
   service-vols:

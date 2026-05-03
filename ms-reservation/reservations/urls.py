@@ -68,7 +68,7 @@ urlpatterns = [
          views.ReservationViewSet.as_view({'get': 'download_ticket'}),
          name='reservation-ticket-download'),
     path('reservations/<int:pk>/cancel_reservation/', 
-         views.ReservationViewSet.as_view({'post': 'cancel_reservation'}),
+         views.ReservationViewSet.as_view({'post': 'cancel_booking'}),
          name='cancel-reservation'),
     path('reservations/<int:pk>/request_refund/', 
          views.ReservationViewSet.as_view({'post': 'request_refund'}),
