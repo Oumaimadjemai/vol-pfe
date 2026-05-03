@@ -4,6 +4,7 @@ import threading
 import os
 from kafka import KafkaConsumer
 from django.core.cache import cache
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class ReservationKafkaConsumer:
                 'user-events',
                 'voyageur-events',
                 'passenger-events',
+                'payment.confirmed',
                 bootstrap_servers=bootstrap_servers.split(','),
                 value_deserializer=lambda x: json.loads(x.decode('utf-8')),
                 auto_offset_reset='earliest',
@@ -94,7 +96,7 @@ class ReservationKafkaConsumer:
             'PASSENGER_CREATED':  self._on_passenger_upsert,
             'PASSENGER_UPDATED':  self._on_passenger_upsert,
             'PASSENGER_DELETED':  self._on_passenger_deleted,
-        }
+            'payment.confirmed':    self._on_payment_confirmed,        }
 
         handler = handlers.get(event_type)
         if handler:
@@ -102,6 +104,32 @@ class ReservationKafkaConsumer:
         else:
             logger.debug(f"Unhandled event type: {event_type}")
 
+    def _on_payment_confirmed(self, payload: dict):
+        """Traiter les paiements confirmés (depuis ms-paiement)"""
+        reservation_id = payload.get('reservationId')
+        amount = payload.get('amount')
+        status = payload.get('status')
+        payment_method = payload.get('paymentMethod')
+        
+        logger.info(f"💰 [PAYMENT] Paiement confirmé: réservation {reservation_id}, amount {amount}, status {status}")
+        
+        try:
+            from reservations.models import Reservation
+            
+            # Mettre à jour la réservation
+            reservation = Reservation.objects.get(id=reservation_id)
+            reservation.status = 'PRICE_CONFIRMED'
+            reservation.last_confirmed_price = amount
+            reservation.save()
+            
+            logger.info(f"✅ [PAYMENT] Réservation {reservation_id} confirmée")
+            
+        except Reservation.DoesNotExist:
+            logger.error(f"❌ [PAYMENT] Réservation {reservation_id} non trouvée")
+        except Exception as e:
+            logger.error(f"❌ [PAYMENT] Erreur: {e}")
+
+   
     # ------------------------------------------------------------------ #
     # User handlers
     # ------------------------------------------------------------------ #
@@ -231,3 +259,5 @@ def stop_reservation_consumer():
     if _consumer_instance:
         _consumer_instance.stop()
         _consumer_instance = None
+           
+   

@@ -30,24 +30,38 @@ spring:
           enabled: true
           lower-case-service-id: true
       routes:
+        # Route pour le service d'authentification
         - id: auth-service-route
           uri: lb://AUTH-SERVICE
           predicates:
             - Path=/auth-service/**
           filters:
             - StripPrefix=1
+
+        # Route pour le service des vols
         - id: service-vols-route
           uri: lb://service-vols
           predicates:
             - Path=/service-vols/**
           filters:
             - StripPrefix=1
+
+        # Route pour le service de réservation
         - id: ms-reservation-route
           uri: lb://MS-RESERVATION
           predicates:
             - Path=/ms-reservation/**
           filters:
             - StripPrefix=1
+
+        # Route pour le service de paiement (NOUVEAU)
+        - id: ms-paiement-route
+          uri: lb://MS-PAIEMENT
+          predicates:
+            - Path=/ms-paiement/**
+          filters:
+            - StripPrefix=1
+
 
 eureka:
   client:
