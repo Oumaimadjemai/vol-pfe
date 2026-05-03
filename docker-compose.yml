@@ -1,0 +1,305 @@
+
+
+services:
+  # ============ INFRASTRUCTURE ============
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: microservices
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+     PGADMIN_DEFAULT_EMAIL: admin@admin.com
+     PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+     - "5050:80"
+    networks:
+     - app-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - app-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - app-network
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: kafdrop
+    depends_on:
+      - kafka
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: kafka:29092
+      JVM_OPTS: "-Xms32M -Xmx64M"
+    networks:
+      - app-network
+
+  redis:
+   image: redis:7-alpine
+   ports:
+    - "6379:6379"
+   networks:
+    - app-network
+
+  # ============ MICROSERVICES ============
+
+  # Service Discovery (Eureka) - Port 8888
+  registry:
+    build:
+      context: ./Registery
+      dockerfile: Dockerfile
+    container_name: registry
+    ports:
+      - "8888:8888"
+    networks:
+      - app-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_INSTANCE_HOSTNAME=registry
+      - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
+      - EUREKA_CLIENT_FETCH_REGISTRY=false
+
+  # API Gateway - Port 8080
+  gateway:
+    build:
+      context: ./Gateway
+      dockerfile: Dockerfile
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+    depends_on:
+      - registry
+      - kafka
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://registry:8888/eureka
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+
+  service-auth:
+   build:
+    context: ./service-auth/auth_service
+    dockerfile: Dockerfile
+   container_name: service-auth
+   ports:
+    - "8000:8000"
+   networks:
+    - app-network
+   depends_on:
+    postgres:
+      condition: service_healthy
+    kafka:
+      condition: service_started
+    registry:
+      condition: service_started
+   environment:
+    - POSTGRES_DB=service_auth_db
+    - POSTGRES_USER=postgres
+    - POSTGRES_PASSWORD=postgres
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PORT=5432
+    - POSTGRES_SSL_MODE=disable
+    - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    - KAFKA_ENABLED=True
+    - EUREKA_SERVER=http://registry:8888/eureka
+    - EUREKA_APP_NAME=AUTH-SERVICE  # Changed
+    - EUREKA_HOST=service-auth
+    - EUREKA_PORT=8000  # Changed from EUREKA_INSTANCE_PORT
+    - WAIT_FOR_EUREKA=True  # Changed to True
+    - DISABLE_EUREKA=False
+    - DEBUG=True
+    - SECRET_KEY=docker-dev-secret-key
+    - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-test}
+    - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-test}
+    - EMAIL_USER=${EMAIL_USER:-test@example.com}
+    - EMAIL_PASSWORD=${EMAIL_PASSWORD:-test}
+    - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
+  # Reservation Service (DRF) - Port 8000
+  ms-reservation:
+    build:
+      context: ./ms-reservation
+      dockerfile: Dockerfile
+    container_name: ms-reservation
+    ports:
+      - "8001:8001"
+    networks:
+      - app-network
+    depends_on:
+      - postgres
+      - kafka
+      - registry
+    environment:
+      - AUTH_SERVICE_URL=http://service-auth:8000
+      - POSTGRES_DB=ms_reservation_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_SSL_MODE=disable
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_ENABLED=True
+      - EUREKA_SERVER=http://registry:8888/eureka
+      - EUREKA_APP_NAME=MS-RESERVATION
+      - EUREKA_HOST=ms-reservation
+      - EUREKA_PORT=8001
+      - DISABLE_EUREKA=False
+      - WAIT_FOR_EUREKA=True
+      - DEBUG=True
+      - SECRET_KEY=docker-dev-secret-key
+      - REDIS_URL=redis://redis:6379/1
+      - DJANGO_SERVER_RUNNING=True
+
+  # Vols/Flights Service (Node.js) - Port 3002
+  service-vols:
+    build:
+      context: ./service-vols
+      dockerfile: Dockerfile
+    container_name: service-vols
+    ports:
+      - "3002:3002"
+    networks:
+      - app-network
+    depends_on:
+      - kafka
+      - registry
+    environment:
+      - NODE_ENV=docker
+      - PORT=3002
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - EUREKA_SERVER=http://registry:8888/eureka
+      - RAPIDAPI_KEY=${RAPIDAPI_KEY}
+      - RAPIDAPI_HOST=${RAPIDAPI_HOST}
+    # JWT Secret for auth (if needed)
+      - JWT_SECRET=${JWT_SECRET:-secret_dev}
+    env_file:
+      - ./service-vols/.env
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3002/Vols"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  
+# Service de paiment (Node.js) - Port 3003
+  ms-paiement:
+    build:
+      context: ./ms-paiement
+      dockerfile: Dockerfile
+    container_name: ms-paiement
+    ports:
+      - "3003:3003"
+    networks:
+      - app-network
+    depends_on:
+      - registry
+      - mongodb 
+    environment:
+      - NODE_ENV=docker
+      - PORT=3003
+      - EUREKA_HOST=ms-paiement          # ✅ matches process.env.EUREKA_HOST
+      - EUREKA_IP=ms-paiement            # ✅ matches process.env.EUREKA_IP
+      - EUREKA_SERVER_HOST=registry      # ✅ matches process.env.EUREKA_SERVER_HOST
+      - EUREKA_SERVER_PORT=8888 
+      - CHARGILY_API_KEY=${CHARGILY_API_KEY}
+      - CHARGILY_SECRET_KEY=${CHARGILY_SECRET_KEY}
+      - CHARGILY_API_URL=${CHARGILY_API_URL:-https://api.chargily.com/v2}
+      - CHARGILY_WEBHOOK_SECRET=${CHARGILY_WEBHOOK_SECRET}
+      - RESERVATION_SERVICE_URL=http://ms-reservation:8001
+      - MONGO_URI=mongodb://admin:password@mongodb:27017/ms_paiement?authSource=admin
+      - WEBHOOK_BASE_URL=https://relish-underling-lumpish.ngrok-free.dev
+    env_file:
+      - ./ms-paiement/.env
+    #healthcheck:
+      #test: ["CMD", "curl", "-f", "http://localhost:3003/api/payments/health"]
+      #interval: 30s
+      #timeout: 10s
+      #retries: 3
+
+  # MongoDB pour le service de paiement
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - app-network
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  # ============ NGROK ============
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    ports:
+      - "4040:4040"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http ms-paiement:3003 --log=stdout
+    networks:
+      - app-network
+    depends_on:
+      - ms-paiement
+    restart: unless-stopped
+
+
+volumes:
+  postgres_data:
+  mongodb_data:   
+
+
+networks:
+  app-network:
+    driver: bridge
