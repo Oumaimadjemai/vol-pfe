@@ -45,6 +45,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_blocked = models.BooleanField(default=False)
+    agency_local_id = models.IntegerField(null=True, blank=True, help_text="ID in agency's local DB for agents/voyageurs")  
+    is_cross_agency = models.BooleanField(default=False, help_text="Indicates if user can access multiple agencies (for agents)")
+
     
     # Nouveaux champs
     date_joined = models.DateTimeField(default=timezone.now)
@@ -113,6 +116,7 @@ class Voyageur(Personne):
     pays = models.CharField(max_length=50,null=True,blank=True)
     wilaya = models.CharField(max_length=100,null=True,blank=True)
     commune = models.CharField(max_length=100,null=True,blank=True)
+    agency_id = models.IntegerField(null=True, blank=True, help_text="ID of the agency this voyageur belongs to")
 
     def __str__(self):
         return f"{self.nom} {self.prenom}"

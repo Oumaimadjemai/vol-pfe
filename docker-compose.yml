@@ -6,7 +6,7 @@ services:
     image: postgres:15-alpine
     container_name: postgres
     environment:
-      POSTGRES_DB: microservices
+      POSTGRES_DB: super_admin_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -142,7 +142,7 @@ services:
     registry:
       condition: service_started
    environment:
-    - POSTGRES_DB=service_auth_db
+    - SUPER_ADMIN_DB_NAME=super_admin_db
     - POSTGRES_USER=postgres
     - POSTGRES_PASSWORD=postgres
     - POSTGRES_HOST=postgres
@@ -166,7 +166,12 @@ services:
     - EMAIL_HOST=smtp.gmail.com  # Add this
     - EMAIL_PORT=587  # Add this
     - EMAIL_USE_TLS=True  # Add this
+    - PLATFORM_NAME=Travel Platform
+    - MAIN_DOMAIN=localhost
     - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
+   volumes:
+      - ./service-auth/auth_service:/app
+   command: python manage.py runserver 0.0.0.0:8000
   # Reservation Service (DRF) - Port 8000
   ms-reservation:
     build:

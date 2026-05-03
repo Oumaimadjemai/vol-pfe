@@ -19,7 +19,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-
+PLATFORM_NAME = config('PLATFORM_NAME', default='Travel Platform')
+MAIN_DOMAIN = config('MAIN_DOMAIN', default='yourplatform.com')
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-g4j(-i5g0x&ey6!7u#k+5)=ndgiv&gn1&r*rz!%t^5*t4u)uu='
 
@@ -42,6 +43,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
+    'tenant_management',
     'users',
     "django.contrib.sites",
     "allauth",
@@ -68,6 +70,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware', 
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'tenant_management.middleware.TenantMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -192,20 +195,27 @@ WSGI_APPLICATION = 'auth_service.wsgi.application'
 
 
 
+import os
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('POSTGRES_DB'),
-        'USER': config('POSTGRES_USER'),
-        'PASSWORD': config('POSTGRES_PASSWORD'),
-        'HOST': config('POSTGRES_HOST'),
+        'NAME': config('SUPER_ADMIN_DB_NAME', default='super_admin_db'),
+        'USER': config('POSTGRES_USER', default='postgres'),
+        'PASSWORD': config('POSTGRES_PASSWORD', default='postgres'),
+        'HOST': config('POSTGRES_HOST', default='postgres'),
         'PORT': config('POSTGRES_PORT', default=5432),
+        'CONN_MAX_AGE': 60,
         'OPTIONS': {
-            'sslmode': config('POSTGRES_SSL_MODE', default='require'),
+            'connect_timeout': 10,
         }
     }
 }
 
+# Only add SSL options if using Neon or requiring SSL
+if config('POSTGRES_SSL_MODE', default='disable') != 'disable':
+    DATABASES['default']['OPTIONS']['sslmode'] = config('POSTGRES_SSL_MODE')
+DATABASE_ROUTERS = ['tenant_management.db_router.MultiTenantRouter']
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
