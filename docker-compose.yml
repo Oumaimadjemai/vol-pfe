@@ -280,7 +280,12 @@ services:
       - NODE_ENV=docker
       - PORT=3002
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - EUREKA_SERVER=http://registry:8888/eureka
+      - EUREKA_HOST=registry
+      - EUREKA_PORT=8888
+      - EUREKA_SERVER_HOST=registry
+      - EUREKA_SERVER_PORT=8888
+      - EUREKA_INSTANCE_HOST=service-vols
+      - EUREKA_INSTANCE_IP=service-vols
       - RAPIDAPI_KEY=${RAPIDAPI_KEY}
       - RAPIDAPI_HOST=${RAPIDAPI_HOST}
     # JWT Secret for auth (if needed)

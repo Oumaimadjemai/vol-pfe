@@ -5,15 +5,12 @@ from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Avg, Sum, Count, Q
-from django.contrib.auth import get_user_model
 from .models import Destination, Offer, Review
 from .serializers import (
     DestinationListSerializer, DestinationDetailSerializer, 
     DestinationCreateUpdateSerializer, ReviewSerializer,
     OfferListSerializer, OfferDetailSerializer, OfferCreateUpdateSerializer
 )
-
-User = get_user_model()
 
 # Custom Pagination
 class DestinationPagination(PageNumberPagination):
@@ -41,7 +38,7 @@ class DestinationListView(generics.ListCreateAPIView):
     
     def get_permissions(self):
         if self.request.method == 'POST':
-            self.permission_classes = [IsAdminUser]
+            return [IsAdminUser()]
         return super().get_permissions()
     
     def get_serializer_class(self):
@@ -50,33 +47,18 @@ class DestinationListView(generics.ListCreateAPIView):
         return DestinationListSerializer
     
     def perform_create(self, serializer):
-        # Get the user from request
+        # Only save with created_by if user is authenticated and is a valid User instance
         user = self.request.user
-        user_id = None
-        
-        # Check if user is authenticated
-        if user and user.is_authenticated:
-            # If it's a custom user object, get the id
-            if hasattr(user, 'id'):
-                user_id = user.id
-            # Try to get or create a real User object if needed
+        if user and user.is_authenticated and hasattr(user, 'id'):
             try:
-                if not isinstance(user, User) and user_id:
-                    real_user, created = User.objects.get_or_create(
-                        id=user_id,
-                        defaults={
-                            'username': getattr(user, 'email', f'user_{user_id}'),
-                            'email': getattr(user, 'email', ''),
-                        }
-                    )
-                    user = real_user
+                # Only save if user exists in the database
+                if user.id:
+                    serializer.save(created_by=user)
+                else:
+                    serializer.save()
             except Exception as e:
-                print(f"Error converting user: {e}")
-                user = None
-        
-        # Save with created_by only if we have a valid User instance
-        if user and isinstance(user, User):
-            serializer.save(created_by=user)
+                print(f"Error saving with user: {e}")
+                serializer.save()
         else:
             serializer.save()
 
@@ -94,7 +76,7 @@ class DestinationDetailView(generics.RetrieveUpdateDestroyAPIView):
     
     def get_permissions(self):
         if self.request.method in ['PUT', 'PATCH', 'DELETE']:
-            self.permission_classes = [IsAdminUser]
+            return [IsAdminUser()]
         return super().get_permissions()
     
     def get_serializer_class(self):
@@ -103,32 +85,9 @@ class DestinationDetailView(generics.RetrieveUpdateDestroyAPIView):
         return DestinationDetailSerializer
     
     def perform_update(self, serializer):
-        # Get the user from request
+        # Only save with updated_by if user is authenticated
         user = self.request.user
-        user_id = None
-        
-        # Check if user is authenticated
         if user and user.is_authenticated:
-            # If it's a custom user object, get the id
-            if hasattr(user, 'id'):
-                user_id = user.id
-            # Try to get or create a real User object if needed
-            try:
-                if not isinstance(user, User) and user_id:
-                    real_user, created = User.objects.get_or_create(
-                        id=user_id,
-                        defaults={
-                            'username': getattr(user, 'email', f'user_{user_id}'),
-                            'email': getattr(user, 'email', ''),
-                        }
-                    )
-                    user = real_user
-            except Exception as e:
-                print(f"Error converting user: {e}")
-                user = None
-        
-        # Save with updated_by only if we have a valid User instance
-        if user and isinstance(user, User):
             serializer.save(updated_by=user)
         else:
             serializer.save()
@@ -162,7 +121,7 @@ class OfferListView(generics.ListCreateAPIView):
     
     def get_permissions(self):
         if self.request.method == 'POST':
-            self.permission_classes = [IsAdminUser]
+            return [IsAdminUser()]
         return super().get_permissions()
     
     def get_serializer_class(self):
@@ -171,32 +130,9 @@ class OfferListView(generics.ListCreateAPIView):
         return OfferListSerializer
     
     def perform_create(self, serializer):
-        # Get the user from request
+        # Only save with created_by if user is authenticated
         user = self.request.user
-        user_id = None
-        
-        # Check if user is authenticated
         if user and user.is_authenticated:
-            # If it's a custom user object, get the id
-            if hasattr(user, 'id'):
-                user_id = user.id
-            # Try to get or create a real User object if needed
-            try:
-                if not isinstance(user, User) and user_id:
-                    real_user, created = User.objects.get_or_create(
-                        id=user_id,
-                        defaults={
-                            'username': getattr(user, 'email', f'user_{user_id}'),
-                            'email': getattr(user, 'email', ''),
-                        }
-                    )
-                    user = real_user
-            except Exception as e:
-                print(f"Error converting user for offer: {e}")
-                user = None
-        
-        # Save with created_by only if we have a valid User instance
-        if user and isinstance(user, User):
             serializer.save(created_by=user)
         else:
             serializer.save()
@@ -215,7 +151,7 @@ class OfferDetailView(generics.RetrieveUpdateDestroyAPIView):
     
     def get_permissions(self):
         if self.request.method in ['PUT', 'PATCH', 'DELETE']:
-            self.permission_classes = [IsAdminUser]
+            return [IsAdminUser()]
         return super().get_permissions()
     
     def get_serializer_class(self):
@@ -224,39 +160,16 @@ class OfferDetailView(generics.RetrieveUpdateDestroyAPIView):
         return OfferDetailSerializer
     
     def perform_update(self, serializer):
-        # Get the user from request
+        # Only save with updated_by if user is authenticated
         user = self.request.user
-        user_id = None
-        
-        # Check if user is authenticated
         if user and user.is_authenticated:
-            # If it's a custom user object, get the id
-            if hasattr(user, 'id'):
-                user_id = user.id
-            # Try to get or create a real User object if needed
-            try:
-                if not isinstance(user, User) and user_id:
-                    real_user, created = User.objects.get_or_create(
-                        id=user_id,
-                        defaults={
-                            'username': getattr(user, 'email', f'user_{user_id}'),
-                            'email': getattr(user, 'email', ''),
-                        }
-                    )
-                    user = real_user
-            except Exception as e:
-                print(f"Error converting user for offer update: {e}")
-                user = None
-        
-        # Save with updated_by only if we have a valid User instance
-        if user and isinstance(user, User):
             serializer.save(updated_by=user)
         else:
             serializer.save()
 
 
 class OfferActiveView(generics.ListAPIView):
-    """GET: Get active offers"""
+    """GET: Get active offers - PUBLIC ENDPOINT"""
     serializer_class = OfferListSerializer
     permission_classes = [AllowAny]
     
@@ -351,8 +264,8 @@ class ReviewDetailView(generics.RetrieveUpdateDestroyAPIView):
     
     def get_permissions(self):
         if self.request.method in ['PUT', 'PATCH', 'DELETE']:
-            self.permission_classes = [IsAdminUser]
-        return super().get_permissions()
+            return [IsAdminUser()]
+        return [AllowAny()]
 
 
 # ============ FUNCTION-BASED VIEWS ============
