@@ -40,7 +40,11 @@ class AuthServiceClient:
         try:
             user_id = user_data.get('id')
             email = user_data.get('email')
-            username = user_data.get('username', email.split('@')[0])
+            username = user_data.get('username')
+            
+            # If no username is provided, generate one from email
+            if not username:
+                username = email.split('@')[0] if email else f"user_{user_id}"
             
             # Try to get existing user
             user, created = User.objects.get_or_create(
@@ -69,12 +73,16 @@ class AuthServiceClient:
             return None
 
 
-class JWTAuthentication(BaseAuthentication):
-    """JWT Authentication class for Destination Service"""
+class OptionalJWTAuthentication(BaseAuthentication):
+    """
+    JWT Authentication that doesn't fail for unauthenticated requests.
+    Returns None for unauthenticated, user for authenticated.
+    """
     
     def authenticate(self, request):
         auth_header = request.headers.get('Authorization')
         
+        # No token - allow anonymous access
         if not auth_header:
             return None
         
@@ -89,16 +97,17 @@ class JWTAuthentication(BaseAuthentication):
             auth_client = AuthServiceClient()
             user_data = auth_client.verify_token(token)
             
+            # Invalid token - allow anonymous access
             if not user_data:
-                raise AuthenticationFailed('Invalid or expired token')
+                return None
             
-            # Get or create Django user
+            # Get or create user
             user = auth_client.get_or_create_user(user_data)
             
             if not user:
-                raise AuthenticationFailed('Could not create user')
+                return None
             
-            # Add custom attributes to user
+            # Add custom attributes
             user.role = user_data.get('role')
             user.original_data = user_data
             
@@ -106,7 +115,8 @@ class JWTAuthentication(BaseAuthentication):
             
         except Exception as e:
             logger.error(f"Authentication error: {e}")
-            raise AuthenticationFailed(f'Authentication error: {str(e)}')
+            # Return None to allow anonymous access
+            return None
     
     def authenticate_header(self, request):
         return 'Bearer'

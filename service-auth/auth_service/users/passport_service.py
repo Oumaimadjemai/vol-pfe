@@ -173,8 +173,14 @@ def validate_mrz_against_person(person, mrz_data: dict) -> tuple[bool, list[str]
 
     # --- Sex ---
     if person.sexe and mrz_data.get('sex'):
-        mrz_sex = mrz_data['sex'].upper()
-        model_sex = 'M' if person.sexe == 'homme' else 'F'
+        mrz_sex = _normalize(mrz_data['sex'])
+        corrections = {
+            'A':'F',
+            'H':'M',
+            'k':'M',
+        }
+        mrz_sex= corrections.get(mrz_sex, mrz_sex)
+        model_sex = 'M' if person.sexe.lower() == 'homme' else 'F'
         if mrz_sex not in ('', '<') and mrz_sex != model_sex:
             errors.append(f"Sexe ne correspond pas : BD='{person.sexe}' / MRZ='{mrz_sex}'")
 
