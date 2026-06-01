@@ -443,7 +443,7 @@ class PasswordResetRequestView(generics.GenericAPIView):
             topic='user-events',
             event_type='PASSWORD_RESET_REQUESTED',
             payload={
-                'email': serializer.validated_data['email'],
+                'email': serializer.validated_data.get('email', None),
                 'timestamp': timezone.now().isoformat() 
             },
             source_service='auth-service'   
@@ -466,7 +466,7 @@ class PasswordResetConfirmView(generics.GenericAPIView):
             topic='user-events',
             event_type='PASSWORD_RESET_CONFIRMED',
             payload={
-                'email': serializer.validated_data['email'],
+                'email': serializer.validated_data.get('email', None),
                 'timestamp': timezone.now().isoformat() ,
             },
             source_service='auth-service'   
@@ -545,7 +545,7 @@ class GoogleSuccessView(APIView):
                 print(f"User found via social account: {user.email}")
             except SocialAccount.DoesNotExist:
                 print("No social account found")
-                return redirect("http://localhost:3000/login?error=no_user")
+                return redirect("http://triphubdz.com/login?error=no_user")
         
         print(f"User email: {user.email}")
         print(f"User ID: {user.id}")
@@ -570,7 +570,7 @@ class GoogleSuccessView(APIView):
         
         # Build URL
         redirect_url = (
-            f"http://localhost:3000/auth/callback"
+            f"http://triphubdz.com/auth/callback"
             f"?access_token={refresh.access_token}"
             f"&refresh_token={refresh}"
             f"&voyageur={encoded_user_data}"
