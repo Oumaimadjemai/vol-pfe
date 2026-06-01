@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ============ INFRASTRUCTURE ============
   postgres:
@@ -86,13 +84,30 @@ services:
    networks:
     - app-network
 
-  # ============ MICROSERVICES ============
+  # MongoDB pour le service de paiement
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - app-network
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ============ MICROSERVICES (FROM DOCKER HUB) ============
 
   # Service Discovery (Eureka) - Port 8888
   registry:
-    build:
-      context: ./Registery
-      dockerfile: Dockerfile
+    image: oumaima104/registry:latest
     container_name: registry
     ports:
       - "8888:8888"
@@ -106,9 +121,7 @@ services:
 
   # API Gateway - Port 8080
   gateway:
-    build:
-      context: ./Gateway
-      dockerfile: Dockerfile
+    image: oumaima104/gateway:latest
     container_name: gateway
     ports:
       - "8080:8080"
@@ -123,60 +136,50 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
 
   service-auth:
-   build:
-    context: ./service-auth/auth_service
-    dockerfile: Dockerfile
-   container_name: service-auth
-   ports:
-    - "8000:8000"
-   networks:
-    - app-network
+    image: oumaima104/service-auth:latest
+    container_name: service-auth
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      registry:
+        condition: service_started
+    environment:
+      - POSTGRES_DB=service_auth_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_SSL_MODE=disable
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_ENABLED=True
+      - EUREKA_SERVER=http://registry:8888/eureka
+      - EUREKA_APP_NAME=AUTH-SERVICE
+      - EUREKA_HOST=service-auth
+      - EUREKA_PORT=8000
+      - WAIT_FOR_EUREKA=True
+      - DISABLE_EUREKA=False
+      - DEBUG=True
+      - SECRET_KEY=docker-dev-secret-key
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - EMAIL_HOST=smtp.gmail.com
+      - EMAIL_PORT=587
+      - EMAIL_USE_TLS=True
+      - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
 
-   env_file:
-    - ./service-auth/auth_service/.env
-   depends_on:
-    postgres:
-      condition: service_healthy
-    kafka:
-      condition: service_started
-    registry:
-      condition: service_started
-   environment:
-    - SUPER_ADMIN_DB_NAME=super_admin_db
-    - POSTGRES_USER=postgres
-    - POSTGRES_PASSWORD=postgres
-    - POSTGRES_HOST=postgres
-    - POSTGRES_PORT=5432
-    - POSTGRES_SSL_MODE=disable
-    - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-    - KAFKA_ENABLED=True
-    - EUREKA_SERVER=http://registry:8888/eureka
-    - EUREKA_APP_NAME=AUTH-SERVICE  # Changed
-    - EUREKA_HOST=service-auth
-    - EUREKA_PORT=8000  # Changed from EUREKA_INSTANCE_PORT
-    - WAIT_FOR_EUREKA=True  # Changed to True
-    - DISABLE_EUREKA=False
-    - DEBUG=True
-    - SECRET_KEY=docker-dev-secret-key
-    - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-    - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-    - DEBUG=True
-    - EMAIL_USER=${EMAIL_USER}
-    - EMAIL_PASSWORD=${EMAIL_PASSWORD}
-    - EMAIL_HOST=smtp.gmail.com  # Add this
-    - EMAIL_PORT=587  # Add this
-    - EMAIL_USE_TLS=True  # Add this
-    - PLATFORM_NAME=Travel Platform
-    - MAIN_DOMAIN=localhost
-    - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
-   volumes:
-      - ./service-auth/auth_service:/app
-   command: python manage.py runserver 0.0.0.0:8000
-  # Reservation Service (DRF) - Port 8000
+  # Reservation Service (DRF) - Port 8001
   ms-reservation:
-    build:
-      context: ./ms-reservation
-      dockerfile: Dockerfile
+    image: oumaima104/ms-reservation:latest
     container_name: ms-reservation
     ports:
       - "8001:8001"
@@ -208,9 +211,7 @@ services:
       - DJANGO_SERVER_RUNNING=True
 
   ms-destination:
-    build:
-      context: ./ms-destination
-      dockerfile: Dockerfile
+    image: oumaima104/ms-destination:latest
     container_name: ms-destination
     ports:
       - "8002:8002"
@@ -226,53 +227,31 @@ services:
       service-auth:
         condition: service_started
     environment:
-      # Django Settings
       - DEBUG=True
       - SECRET_KEY=docker-dev-secret-key-destination
       - ALLOWED_HOSTS=localhost,127.0.0.1,ms-destination
-      
-      # Database
       - DB_NAME=ms_destination_db
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - DB_HOST=postgres
       - DB_PORT=5432
-      
-      # Kafka
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_ENABLED=True
-      
-      # Eureka Configuration
       - EUREKA_SERVER=http://registry:8888/eureka
       - EUREKA_APP_NAME=MS-DESTINATION
       - EUREKA_HOST=ms-destination
       - EUREKA_INSTANCE_PORT=8002
       - WAIT_FOR_EUREKA=True
       - DISABLE_EUREKA=False
-      
-      # Service URLs
       - AUTH_SERVICE_URL=http://service-auth:8000
       - AUTH_SERVICE_EUREKA_NAME=AUTH-SERVICE
-      
-      # Redis (if needed)
       - REDIS_URL=redis://redis:6379/2
-      
-      # Django specific
       - DJANGO_SERVER_RUNNING=True
       - RUN_MAIN=true
-      
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/actuator/health/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   # Vols/Flights Service (Node.js) - Port 3002
   service-vols:
-    build:
-      context: ./service-vols
-      dockerfile: Dockerfile
+    image: oumaima104/service-vols:latest
     container_name: service-vols
     ports:
       - "3002:3002"
@@ -285,21 +264,64 @@ services:
       - NODE_ENV=docker
       - PORT=3002
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - EUREKA_SERVER=http://registry:8888/eureka
+      - EUREKA_HOST=registry
+      - EUREKA_PORT=8888
+      - EUREKA_SERVER_HOST=registry
+      - EUREKA_SERVER_PORT=8888
+      - EUREKA_INSTANCE_HOST=service-vols
+      - EUREKA_INSTANCE_IP=service-vols
       - RAPIDAPI_KEY=${RAPIDAPI_KEY}
       - RAPIDAPI_HOST=${RAPIDAPI_HOST}
-    # JWT Secret for auth (if needed)
       - JWT_SECRET=${JWT_SECRET:-secret_dev}
     env_file:
-      - ./service-vols/.env
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3002/Vols"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - .env
+
+  # Service de paiement (Node.js) - Port 3003
+  ms-paiement:
+    image: oumaima104/ms-paiement:latest
+    container_name: ms-paiement
+    ports:
+      - "3003:3003"
+    networks:
+      - app-network
+    depends_on:
+      - registry
+      - mongodb
+    environment:
+      - NODE_ENV=docker
+      - PORT=3003
+      - EUREKA_HOST=ms-paiement
+      - EUREKA_IP=ms-paiement
+      - EUREKA_SERVER_HOST=registry
+      - EUREKA_SERVER_PORT=8888
+      - CHARGILY_API_KEY=${CHARGILY_API_KEY}
+      - CHARGILY_SECRET_KEY=${CHARGILY_SECRET_KEY}
+      - CHARGILY_API_URL=${CHARGILY_API_URL:-https://api.chargily.com/v2}
+      - CHARGILY_WEBHOOK_SECRET=${CHARGILY_WEBHOOK_SECRET}
+      - RESERVATION_SERVICE_URL=http://ms-reservation:8001
+      - MONGO_URI=mongodb://admin:password@mongodb:27017/ms_paiement?authSource=admin
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL}
+    env_file:
+      - .env
+
+  # ============ NGROK ============
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    ports:
+      - "4040:4040"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http ms-paiement:3003 --log=stdout
+    networks:
+      - app-network
+    depends_on:
+      - ms-paiement
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  mongodb_data:
 
 networks:
   app-network:

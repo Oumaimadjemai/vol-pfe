@@ -137,12 +137,13 @@ AUTH_SERVICE_EUREKA_NAME = os.getenv('AUTH_SERVICE_EUREKA_NAME', 'AUTH-SERVICE')
 # REST Framework Authentication
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'dest.auth_client.JWTAuthentication',  # Add custom JWT auth
+        'dest.auth_client.OptionalJWTAuthentication',  # Add custom JWT auth
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+        'rest_framework.permissions.AllowAny', 
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,

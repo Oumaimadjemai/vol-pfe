@@ -12,7 +12,11 @@ public class CorsConfig {
     @Bean
     public CorsWebFilter corsWebFilter() {
         CorsConfiguration corsConfig = new CorsConfiguration();
-        corsConfig.addAllowedOrigin("http://localhost:3000");
+         corsConfig.addAllowedOrigin("http://localhost:3000");        // Local dev
+        corsConfig.addAllowedOrigin("https://triphubdz.com");        // ← MISSING! Production with HTTPS
+        corsConfig.addAllowedOrigin("https://www.triphubdz.com");    // Production with www
+        corsConfig.addAllowedOrigin("http://triphubdz.com");         // HTTP fallback
+        corsConfig.addAllowedOrigin("http://www.triphubdz.com");     // HTTP www fallback
         corsConfig.addAllowedMethod("GET");
         corsConfig.addAllowedMethod("POST");
         corsConfig.addAllowedMethod("PUT");

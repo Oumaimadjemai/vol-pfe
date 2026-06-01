@@ -25,5 +25,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Simple command - no migrations, just run server
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# Run the application
+CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]

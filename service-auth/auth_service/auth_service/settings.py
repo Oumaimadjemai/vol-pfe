@@ -84,14 +84,20 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  # Votre frontend React
     "http://127.0.0.1:3000",
-    "https://vol-cyan.vercel.app"
+    "https://vol-cyan.vercel.app",
+    "https://triphubdz.com"
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://vol-cyan.vercel.app"
+    "https://vol-cyan.vercel.app",
+    "https://triphubdz.com"
 ]
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 CORS_ALLOW_HEADERS = ["*"]
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
@@ -124,8 +130,8 @@ SOCIALACCOUNT_ADAPTER = "users.adapter.MySocialAccountAdapter"
 # FRONTEND_URL = 'https://vol-cyan.vercel.app'  # Update for production
 # ACCOUNT_LOGOUT_REDIRECT_URL = 'https://vol-cyan.vercel.app'
 # Ajoutez cette ligne avec vos autres settings
-FRONTEND_URL = 'http://localhost:3000'  # Changez avec l'URL de votre frontend
-ACCOUNT_LOGOUT_REDIRECT_URL = 'http://localhost:3000'
+FRONTEND_URL = 'http://triphubdz.com'  # Changez avec l'URL de votre frontend
+ACCOUNT_LOGOUT_REDIRECT_URL = 'http://triphubdz.com/login'
 # Assurez-vous que ces settings sont présents
 LOGIN_REDIRECT_URL = '/auth/google-success/'
 # In settings.py
@@ -145,7 +151,6 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 # CSRF settings
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read CSRF token
-CSRF_TRUSTED_ORIGINS = ['http://localhost:3000', 'https://vol-cyan.vercel.app/']
 
 # Allauth settings
 ACCOUNT_AUTHENTICATED_LOGIN_REDIRECTS = True

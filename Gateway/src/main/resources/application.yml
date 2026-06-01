@@ -8,50 +8,39 @@ spring:
     name: gateway-service
   cloud:
     gateway:
-      globalcors:
-        corsConfigurations:
-          '[/**]':
-            allowedOrigins:
-              - "http://localhost:3000"
-              - "https://vol-cyan.vercel.app"
-            allowedMethods:
-              - GET
-              - POST
-              - PUT
-              - PATCH
-              - DELETE
-              - OPTIONS
-            allowedHeaders:
-              - "*"
-            allowCredentials: true
-            maxAge: 3600
       discovery:
         locator:
           enabled: true
           lower-case-service-id: true
       routes:
-        - id: auth-service-route
+        - id: auth-service
           uri: lb://AUTH-SERVICE
           predicates:
             - Path=/auth-service/**
           filters:
             - StripPrefix=1
-        - id: service-vols-route
+        - id: ms-destination
+          uri: lb://MS-DESTINATION
+          predicates:
+            - Path=/ms-destination/**
+          filters:
+            - StripPrefix=1
+        - id: service-vols
           uri: lb://service-vols
           predicates:
             - Path=/service-vols/**
           filters:
             - StripPrefix=1
-        - id: ms-reservation-route
+        - id: ms-reservation
           uri: lb://MS-RESERVATION
           predicates:
             - Path=/ms-reservation/**
           filters:
             - StripPrefix=1
-        - id: ms-destination-route
-          uri: lb://MS-DESTINATION
+        - id: ms-paiement
+          uri: lb://MS-PAIEMENT
           predicates:
-            - Path=/ms-destination/**
+            - Path=/ms-paiement/**
           filters:
             - StripPrefix=1
 
@@ -61,3 +50,11 @@ eureka:
       defaultZone: http://registry:8888/eureka/
     fetch-registry: true
     register-with-eureka: true
+  instance:
+    hostname: gateway
+    prefer-ip-address: false
+
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.web: DEBUG
