@@ -29,6 +29,7 @@ class Reservation(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     # Relation with auth service
+    tenant_id = models.CharField(max_length=36, null=True, blank=True, db_index=True)
     voyageur = models.IntegerField()
 
     # Trip info
@@ -71,6 +72,8 @@ class Reservation(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["reservation_number"]),
+            models.Index(fields=["tenant_id", "voyageur"]),
+            models.Index(fields=["tenant_id", "status"]),
             models.Index(fields=["voyageur"]),
             models.Index(fields=["status"]),
             models.Index(fields=["amadeus_pnr"]),

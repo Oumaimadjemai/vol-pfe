@@ -586,7 +586,7 @@ class GoogleSuccessView(APIView):
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .serializers import UserSerializer, VoyageurSerializer
+from .serializers import UserSerializer, VoyageurSerializer, build_tenant_payload
 
 # Mise à jour de MeView
 class MeView(APIView):
@@ -594,6 +594,7 @@ class MeView(APIView):
     
     def get(self, request):
         user = request.user
+        tenant_payload = build_tenant_payload(request, user)
         data = {
             'id': user.id,
             'email': user.email,
@@ -605,6 +606,7 @@ class MeView(APIView):
             'date_joined': user.date_joined.strftime("%Y-%m-%d"),
             'last_login': user.last_login.strftime("%Y-%m-%d") if user.last_login else None,
             'features': user.features if user.role == 'agent' else [],
+            **tenant_payload,
         }
         
         # Add voyageur data if role is voyageur

@@ -21,6 +21,18 @@ class TenantMiddleware(MiddlewareMixin):
             request.agency = None
             set_current_tenant_db('default')
             return None
+
+        tenant_id = request.headers.get('X-Tenant-ID') or request.headers.get('X-Agency-ID')
+        if tenant_id:
+            try:
+                agency = Agency.objects.get(id=tenant_id, status='active')
+                request.agency = agency
+                request.is_super_admin_request = False
+                db_alias = ensure_agency_connection(str(agency.id))
+                set_current_tenant_db(db_alias)
+                return None
+            except (Agency.DoesNotExist, ValueError):
+                pass
         
         host = request.get_host().split(':')[0]
         

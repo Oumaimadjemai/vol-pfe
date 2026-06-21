@@ -14,6 +14,33 @@ from .models import User, Voyageur, Passenger
 
 User = get_user_model()
 
+
+def get_request_agency(request):
+    if not request:
+        return None
+    return getattr(request, "agency", None)
+
+
+def build_tenant_payload(request, user=None):
+    agency = get_request_agency(request)
+    if not agency:
+        return {
+            "tenant_id": None,
+            "agency_id": None,
+            "agency_slug": None,
+            "agency_name": None,
+            "agency_role": None,
+        }
+
+    agency_role = getattr(user, "role", None)
+    return {
+        "tenant_id": str(agency.id),
+        "agency_id": str(agency.id),
+        "agency_slug": agency.slug,
+        "agency_name": agency.name,
+        "agency_role": agency_role,
+    }
+
 # ==================== REGISTER SERIALIZERS ====================
 
 class RegisterVoyageurSerializer(serializers.Serializer):
@@ -228,7 +255,16 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if user.is_blocked:
             raise serializers.ValidationError("Compte bloqué")
 
+        request = self.context.get("request")
+        tenant_payload = build_tenant_payload(request, user)
+
         refresh = self.get_token(user)
+        refresh["tenant_id"] = tenant_payload["tenant_id"]
+        refresh["agency_id"] = tenant_payload["agency_id"]
+        refresh["agency_slug"] = tenant_payload["agency_slug"]
+        refresh["agency_role"] = tenant_payload["agency_role"]
+        refresh["role"] = user.role
+        refresh["features"] = user.features if user.role == 'agent' else []
 
         data = {
             "refresh": str(refresh),
@@ -239,6 +275,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "status": "Actif" if user.is_active and not user.is_blocked else "Suspendu" if user.is_blocked else "Inactif",
             "date_joined": user.date_joined.strftime("%Y-%m-%d") if user.date_joined else None,
             "features": user.features if user.role == 'agent' else [],
+            **tenant_payload,
         }
 
         if user.role == "voyageur":

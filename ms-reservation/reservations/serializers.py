@@ -167,7 +167,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         model = Reservation
         fields = [
             'id', 'reservation_number', 'created_at', 'updated_at',
-            'voyageur', 'status', 'trip_type', 'search_params',
+            'tenant_id', 'voyageur', 'status', 'trip_type', 'search_params',
             'original_offer', 'confirmed_offer', 'amadeus_pnr', 'amadeus_booking_data',
             'last_confirmed_price', 'price_confirmed_at',
             'total_price', 'currency', 'expiry_date', 'confirmation_date',
@@ -175,7 +175,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             'price_confirmations'
         ]
         read_only_fields = [
-            'id', 'reservation_number', 'created_at', 'updated_at',
+            'id', 'reservation_number', 'created_at', 'updated_at', 'tenant_id',
             'original_offer', 'confirmed_offer', 'amadeus_pnr', 'amadeus_booking_data',
             'last_confirmed_price', 'price_confirmed_at',
             'expiry_date', 'confirmation_date'
@@ -196,6 +196,7 @@ class ReservationListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 
             'reservation_number', 
+            'tenant_id',
             'created_at', 
             'status',
             'trip_type', 
@@ -352,6 +353,7 @@ class ReservationDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 
             'reservation_number', 
+            'tenant_id',
             'created_at', 
             'updated_at',
             'voyageur',

@@ -3,6 +3,7 @@ import logging
 from rest_framework import authentication, exceptions
 from django.conf import settings
 from typing import Optional, Dict
+import jwt
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +19,20 @@ class AuthServiceUser:
         self.role = user_data.get('role')
         self.is_authenticated = True
         self.is_active = user_data.get('is_active', True)
+        self.tenant_id = user_data.get('tenant_id') or user_data.get('agency_id')
+        self.agency_id = user_data.get('agency_id') or self.tenant_id
+        self.agency_slug = user_data.get('agency_slug')
+        self.agency_role = user_data.get('agency_role')
+        self.features = user_data.get('features', [])
         
         # Extract voyageur data if present
         self.voyageur_data = user_data.get('voyageur', {})
         self.voyageur_id = user_data.get('voyageur_id') or (self.voyageur_data.get('id') if self.voyageur_data else None)
         
-        logger.info(f"Created AuthServiceUser: id={self.id}, email={self.email}, voyageur_id={self.voyageur_id}")
+        logger.info(
+            f"Created AuthServiceUser: id={self.id}, email={self.email}, "
+            f"voyageur_id={self.voyageur_id}, tenant_id={self.tenant_id}"
+        )
     
     @property
     def is_anonymous(self):
@@ -61,7 +70,8 @@ class AuthServiceJWTAuthentication(authentication.BaseAuthentication):
         logger.info(f"Validating token: {token[:20]}...")
         
         # Validate token with auth service
-        user_data = self._validate_token(token)
+        tenant_id = self._extract_tenant_id(token)
+        user_data = self._validate_token(token, tenant_id)
         
         if not user_data:
             logger.error("Token validation failed")
@@ -76,13 +86,23 @@ class AuthServiceJWTAuthentication(authentication.BaseAuthentication):
         
         return (user, token)
     
-    def _validate_token(self, token: str) -> Optional[Dict]:
+    def _extract_tenant_id(self, token: str) -> Optional[str]:
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            return payload.get("tenant_id") or payload.get("agency_id")
+        except Exception:
+            return None
+
+    def _validate_token(self, token: str, tenant_id: Optional[str] = None) -> Optional[Dict]:
         endpoint = f"{self.auth_service_url}/auth/me/"
+        headers = {'Authorization': f'Bearer {token}'}
+        if tenant_id:
+            headers['X-Tenant-ID'] = tenant_id
         try:
             logger.info(f"Validating token at: {endpoint}")
             response = requests.get(
                 endpoint,
-                headers={'Authorization': f'Bearer {token}'},
+                headers=headers,
                 timeout=self.timeout
             )
             if response.status_code == 200:

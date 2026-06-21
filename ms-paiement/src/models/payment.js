@@ -5,6 +5,12 @@ const mongoose = require('mongoose');
  * Schéma de paiement pour tracer toutes les transactions
  */
 const paymentSchema = new mongoose.Schema({
+  tenantId: {
+    type: String,
+    required: true,
+    index: true
+  },
+
   // Identifiant unique de la réservation (lié au ms-reservation)
   reservationId: {
     type: String,
@@ -86,5 +92,7 @@ const paymentSchema = new mongoose.Schema({
 paymentSchema.index({ transactionId: 1 });
 paymentSchema.index({ paymentIntentId: 1 });
 paymentSchema.index({ status: 1, createdAt: -1 });
+paymentSchema.index({ tenantId: 1, reservationId: 1 });
+paymentSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

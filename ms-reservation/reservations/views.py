@@ -31,6 +31,18 @@ class ReservationViewSet(viewsets.ModelViewSet):
         if not self.auth_client:
             self.auth_client = AuthServiceClient(self.request)
         return self.auth_client
+
+    def get_tenant_id(self):
+        user_tenant = getattr(self.request.user, 'tenant_id', None)
+        header_tenant = self.request.headers.get('X-Tenant-ID')
+        return user_tenant or header_tenant
+
+    def tenant_queryset(self):
+        queryset = Reservation.objects.all()
+        tenant_id = self.get_tenant_id()
+        if tenant_id:
+            queryset = queryset.filter(tenant_id=tenant_id)
+        return queryset
     
     def get_serializer_class(self):
         if self.action == 'list':
@@ -57,13 +69,15 @@ class ReservationViewSet(viewsets.ModelViewSet):
         elif hasattr(user, 'role') and user.role == 'admin':
             is_admin = True
         
+        queryset = self.tenant_queryset()
+
         if is_admin:
-            logger.info(f"Admin user {user.id} fetching all reservations")
-            return Reservation.objects.all().order_by('-created_at')
+            logger.info(f"Admin user {user.id} fetching reservations for tenant {self.get_tenant_id()}")
+            return queryset.order_by('-created_at')
         
         if hasattr(user, 'voyageur_id') and user.voyageur_id:
             logger.info(f"Filtering reservations for voyageur_id: {user.voyageur_id}")
-            return Reservation.objects.filter(voyageur=user.voyageur_id)
+            return queryset.filter(voyageur=user.voyageur_id)
         
         auth_client = self.get_auth_client()
         voyageur_data = auth_client.get_voyageur_by_user_id(user.id)
@@ -71,7 +85,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
         if voyageur_data:
             voyageur_id = voyageur_data.get('id')
             logger.info(f"Found voyageur_id {voyageur_id} for user {user.id}")
-            return Reservation.objects.filter(voyageur=voyageur_id)
+            return queryset.filter(voyageur=voyageur_id)
         
         logger.warning(f"No voyageur found for user {user.id}")
         return Reservation.objects.none()
@@ -96,9 +110,16 @@ class ReservationViewSet(viewsets.ModelViewSet):
 
         data = serializer.validated_data
         user = request.user
+        tenant_id = self.get_tenant_id()
         auth_client = self.get_auth_client()
 
         try:
+            if not tenant_id:
+                return Response(
+                    {'error': 'Tenant context missing'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             # Resolve voyageur_id
             voyageur_id = None
             voyageur_profile = None
@@ -190,6 +211,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
             )
 
             reservation = Reservation.objects.create(
+                tenant_id=tenant_id,
                 voyageur=voyageur_id,
                 trip_type=data['trip_type'],
                 search_params=data['search_params'],
@@ -541,7 +563,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            reservations = Reservation.objects.filter(voyageur=voyageur_id)\
+            reservations = self.tenant_queryset().filter(voyageur=voyageur_id)\
                 .prefetch_related('flight_segments', 'passenger_reservations', 'payment')\
                 .order_by('-created_at')
             
@@ -726,5 +748,7 @@ def test_auth_secure(request):
         'authenticated': True,
         'user_id': user.id,
         'email': getattr(user, 'email', None),
+        'tenant_id': getattr(user, 'tenant_id', None),
+        'agency_slug': getattr(user, 'agency_slug', None),
         'voyageur_id': getattr(user, 'voyageur_id', None),
     })

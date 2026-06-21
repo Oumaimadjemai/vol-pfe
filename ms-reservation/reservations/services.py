@@ -13,12 +13,6 @@ logger = logging.getLogger(__name__)
 # Cache key helpers — single place to change prefixes
 # ------------------------------------------------------------------ #
 
-def _vk(voyageur_id):           return f"voyageur:{voyageur_id}"
-def _vuk(user_id):              return f"voyageur_by_user:{user_id}"
-def _pk(passenger_id):          return f"passenger:{passenger_id}"
-def _ppk(passenger_id):         return f"passengers_for_voyageur:{passenger_id}"
-
-
 class AuthServiceClient:
     """
     Cache-first HTTP client for ms-auth.
@@ -125,7 +119,33 @@ class AuthServiceClient:
                 auth = self.request.META.get('HTTP_AUTHORIZATION')
             if auth:
                 headers['Authorization'] = auth
+            tenant_id = None
+            user = getattr(self.request, "user", None)
+            if user:
+                tenant_id = getattr(user, "tenant_id", None)
+            if not tenant_id and hasattr(self.request, "headers"):
+                tenant_id = self.request.headers.get("X-Tenant-ID")
+            if tenant_id:
+                headers["X-Tenant-ID"] = tenant_id
         return headers
+
+    def _tenant_cache_prefix(self) -> str:
+        if not self.request:
+            return "tenant:global"
+        user = getattr(self.request, "user", None)
+        tenant_id = getattr(user, "tenant_id", None)
+        if not tenant_id and hasattr(self.request, "headers"):
+            tenant_id = self.request.headers.get("X-Tenant-ID")
+        return f"tenant:{tenant_id or 'global'}"
+
+    def _vk(self, voyageur_id):
+        return f"{self._tenant_cache_prefix()}:voyageur:{voyageur_id}"
+
+    def _vuk(self, user_id):
+        return f"{self._tenant_cache_prefix()}:voyageur_by_user:{user_id}"
+
+    def _pk(self, passenger_id):
+        return f"{self._tenant_cache_prefix()}:passenger:{passenger_id}"
 
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Optional[requests.Response]:
         """
@@ -174,9 +194,9 @@ class AuthServiceClient:
 
     def get_voyageur_by_user_id(self, user_id: int) -> Optional[Dict]:
         """Cache-first. Pointer key → full object key → HTTP fallback."""
-        voyageur_id = self._get(_vuk(user_id))
+        voyageur_id = self._get(self._vuk(user_id))
         if voyageur_id:
-            cached = self._get(_vk(voyageur_id))
+            cached = self._get(self._vk(voyageur_id))
             if cached:
                 logger.debug(f"Cache hit: voyageur for user {user_id}")
                 return cached
@@ -200,7 +220,7 @@ class AuthServiceClient:
 
     def get_voyageur_by_id(self, voyageur_id: int) -> Optional[Dict]:
         """Cache-first."""
-        cached = self._get(_vk(voyageur_id))
+        cached = self._get(self._vk(voyageur_id))
         if cached:
             logger.debug(f"Cache hit: voyageur {voyageur_id}")
             return cached
@@ -225,13 +245,13 @@ class AuthServiceClient:
         vid = data.get('id')
         uid = data.get('user_id') or (data.get('user', {}) or {}).get('id')
         if vid:
-            self._set(_vk(vid), data, self._VOYAGEUR_TTL)
+            self._set(self._vk(vid), data, self._VOYAGEUR_TTL)
         if uid:
-            self._set(_vuk(uid), vid, self._VOYAGEUR_TTL)
+            self._set(self._vuk(uid), vid, self._VOYAGEUR_TTL)
 
     def get_passenger(self, passenger_id: int) -> Optional[Dict]:
         """Cache-first."""
-        cached = self._get(_pk(passenger_id))
+        cached = self._get(self._pk(passenger_id))
         if cached:
             logger.debug(f"Cache hit: passenger {passenger_id}")
             return cached
@@ -242,7 +262,7 @@ class AuthServiceClient:
                                           headers=headers)
             if response and response.status_code == 200:
                 data = response.json()
-                self._set(_pk(passenger_id), data, self._PASSENGER_TTL)
+                self._set(self._pk(passenger_id), data, self._PASSENGER_TTL)
                 return data
             if response and response.status_code == 404:
                 return None
@@ -265,7 +285,7 @@ class AuthServiceClient:
 
         # 1. Drain cache
         for pid in passenger_ids:
-            cached = self._get(_pk(pid))
+            cached = self._get(self._pk(pid))
             if cached:
                 result[pid] = cached
             else:
@@ -290,7 +310,7 @@ class AuthServiceClient:
                 # Warm passenger cache as a side-effect
                 for p in rows:
                     if p.get('id'):
-                        self._set(_pk(p['id']), p, self._PASSENGER_TTL)
+                        self._set(self._pk(p['id']), p, self._PASSENGER_TTL)
                 return rows
             return []
         except Exception as e:
@@ -306,7 +326,7 @@ class AuthServiceClient:
             if response and response.status_code in [200, 201]:
                 data = response.json()
                 if data.get('id'):
-                    self._set(_pk(data['id']), data, self._PASSENGER_TTL)
+                    self._set(self._pk(data['id']), data, self._PASSENGER_TTL)
                 return data
             logger.error(f"create_passenger failed: "
                          f"{response.status_code if response else 'no response'} "

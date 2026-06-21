@@ -5,6 +5,7 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
+import jwt
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -20,9 +21,13 @@ class AuthServiceClient:
     def verify_token(self, token):
         """Verify JWT token with Auth Service"""
         try:
+            headers = {'Authorization': f'Bearer {token}'}
+            tenant_id = self.extract_tenant_id(token)
+            if tenant_id:
+                headers['X-Tenant-ID'] = tenant_id
             response = requests.get(
                 f"{self.auth_service_url}/auth/me/",
-                headers={'Authorization': f'Bearer {token}'},
+                headers=headers,
                 timeout=5
             )
             if response.status_code == 200:
@@ -33,6 +38,13 @@ class AuthServiceClient:
                 return None
         except Exception as e:
             logger.error(f"Error verifying token: {e}")
+            return None
+
+    def extract_tenant_id(self, token):
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            return payload.get("tenant_id") or payload.get("agency_id")
+        except Exception:
             return None
     
     def get_or_create_user(self, user_data):
@@ -109,6 +121,8 @@ class OptionalJWTAuthentication(BaseAuthentication):
             
             # Add custom attributes
             user.role = user_data.get('role')
+            user.tenant_id = user_data.get('tenant_id') or user_data.get('agency_id')
+            user.agency_slug = user_data.get('agency_slug')
             user.original_data = user_data
             
             return (user, token)
